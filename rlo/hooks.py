@@ -197,6 +197,7 @@ def run_command_hook(adapter: HookAdapter, stdin, stdout) -> int:
 
 
 # ── 명령 훅 입구: python -m rlo.hooks --model <action-model/1 JSON> [--mode enforce] [--grant Bash] … ──────────────
+#    깔기 · 떼기: python -m rlo.hooks install-hook | uninstall-hook [--settings …] (rlo/install.py)
 
 def _parser():
     ap = argparse.ArgumentParser(prog="python -m rlo.hooks", description="Claude Code 명령 훅 -- Guard 판정(rlo)")
@@ -229,6 +230,10 @@ def _adapter_from_args(a) -> HookAdapter:
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("install-hook", "uninstall-hook"):      # 깔기 · 떼기(CMD-K6) -- rlo/install.py
+        from .install import main as install_main
+        return install_main(argv[0], argv[1:])
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     a = _parser().parse_args(argv)
     raw = stdin.read()

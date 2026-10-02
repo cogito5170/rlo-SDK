@@ -6,14 +6,11 @@
 `claude -p` 는 부르지 않는다: MBA 의 컴파일 실행 파일을 `MBA_CLAUDE_BIN` 으로 가짜(OP=NONE 을 내는 스크립트)로 바꾼다.
 MBA 는 읽기만 한다(이 탐침은 MBA 를 import 하지 않고 그 CLI 만 부른다).
 
-rlo 는 설치 명령이 없다 -- `examples/claude_code_settings.json` 의 항목을 사용자가 손으로 넣는 것을 흉내 낸다:
-    깔기  사건마다 rlo 묶음({"hooks": [rlo 명령]}, PreToolUse 는 matcher "*")을 **끝에 덧붙인다**
-    떼기  명령에 `rlo.hooks` 가 든 훅을 빼고, 빈 묶음 · 빈 사건을 지운다
+rlo 쪽은 설치 명령으로 깔고 뗀다(CMD-K6): `python -m rlo.hooks install-hook | uninstall-hook --settings …`.
 """
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 import pathlib
@@ -29,35 +26,6 @@ USER = {   # 원래 사용자 설정(지어낸 것): 남의 훅 · 다른 칸이
     "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo user-pre"}]}],
               "Stop": [{"hooks": [{"type": "command", "command": "echo user-stop"}]}]},
 }
-
-
-def rlo_entries(python: str, model: str, record: str) -> dict:
-    cmd = f'"{python}" -m {RLO_TAG} --model "{model}" --mode shadow --record "{record}"'
-    return {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": cmd + " --grant Bash"}]}],
-            "Stop": [{"hooks": [{"type": "command", "command": cmd}]}],
-            "SessionEnd": [{"hooks": [{"type": "command", "command": cmd}]}]}
-
-
-def rlo_install(p: pathlib.Path, entries: dict):
-    d = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-    hooks = d.setdefault("hooks", {})
-    for ev, groups in entries.items():
-        hooks.setdefault(ev, []).extend(copy.deepcopy(groups))
-    p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def rlo_uninstall(p: pathlib.Path):
-    d = json.loads(p.read_text(encoding="utf-8"))
-    hooks = d.get("hooks", {})
-    for ev in list(hooks):
-        for g in hooks[ev]:
-            g["hooks"] = [h for h in g.get("hooks", []) if RLO_TAG not in h.get("command", "")]
-        hooks[ev] = [g for g in hooks[ev] if g.get("hooks")]
-        if not hooks[ev]:
-            del hooks[ev]
-    if not hooks:
-        d.pop("hooks", None)
-    p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load(p: pathlib.Path):
@@ -89,6 +57,13 @@ class Probe:
     def check(self, name: str, ok: bool, detail=None):
         self.checks.append({"check": name, "ok": bool(ok), **({"detail": detail} if detail is not None else {})})
 
+    def rlo_cli(self, settings: pathlib.Path, cmd: str):
+        args = [self.python, "-m", RLO_TAG, cmd, "--settings", str(settings)]
+        if cmd == "install-hook":
+            args += ["--model", self.model, "--mode", "shadow", "--grant", "Bash", "--record", self.record]
+        r = subprocess.run(args, env=self.env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
     def mba_cli(self, settings: pathlib.Path, cmd: str):
         r = subprocess.run([self.mba, cmd, "--settings", str(settings)], env=self.env, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
@@ -98,7 +73,6 @@ class Probe:
         p = self.tmp / f"settings-{first}.json"
         p.write_text(json.dumps(USER, indent=2) + "\n", encoding="utf-8")
         bak = p.with_name(p.name + ".bak-mba")
-        entries = rlo_entries(self.python, self.model, self.record)
         steps = {"original": load(p)}
         trace = []
 
@@ -109,8 +83,8 @@ class Probe:
             b = json.loads(bak.read_text(encoding="utf-8"))
             same = [k for k, v in steps.items() if v == b]
             trace.append((step, f"= {same[0]}" if same else "다른 것", "rlo 항목 있음" if RLO_TAG in json.dumps(b) else "rlo 항목 없음"))
-        put = {"mba": lambda: self.mba_cli(p, "install-hook"), "rlo": lambda: rlo_install(p, entries)}
-        take = {"mba": lambda: self.mba_cli(p, "uninstall-hook"), "rlo": lambda: rlo_uninstall(p)}
+        put = {"mba": lambda: self.mba_cli(p, "install-hook"), "rlo": lambda: self.rlo_cli(p, "install-hook")}
+        take = {"mba": lambda: self.mba_cli(p, "uninstall-hook"), "rlo": lambda: self.rlo_cli(p, "uninstall-hook")}
         second = "rlo" if first == "mba" else "mba"
         put[first]()
         steps[f"after_{first}"] = load(p)
@@ -127,8 +101,10 @@ class Probe:
                    commands(both, "PreToolUse")[0] == "echo user-pre" and len(commands(both, "PreToolUse")) == 2
                    and len(commands(both, "SessionEnd")) == 1)
         self.check(f"{tag} 다른 칸(permissions)이 그대로", both.get("permissions") == USER["permissions"])
-        put["mba"]()                                     # MBA 를 다시 깔아도 하나만(MBA 의 '제자리에 하나만')
+        put["mba"]()                                     # 다시 깔아도 하나만(둘 다 '제자리에 하나만')
         self.check(f"{tag} MBA 다시 깔아도 겹치지 않는다", load(p) == both)
+        put["rlo"]()
+        self.check(f"{tag} rlo 다시 깔아도 겹치지 않는다", load(p) == both)
         take[second]()
         note(f"{second} 뗌")
         self.check(f"{tag} {second} 를 떼면 {first} 을 깐 뒤와 같다", load(p) == steps[f"after_{first}"])
@@ -143,8 +119,12 @@ class Probe:
                                                                     load(p))),
                    {"bak_after_both": None if bak_after_both is None else "rlo 항목 있음" if RLO_TAG in bak_after_both
                     else "rlo 항목 없음", "bak_final_has_rlo": None if bak_final is None else RLO_TAG in bak_final})
-        extra = sorted(x.name for x in p.parent.iterdir() if x.name.startswith(p.name) and x.name not in (p.name, bak.name))
-        self.check(f"{tag} 설정 옆에 다른 파일이 생기지 않는다", extra == [], extra)
+        extra = sorted(x.name for x in p.parent.iterdir()
+                       if x.name.startswith(p.name) and x.name not in (p.name, bak.name, p.name + ".bak-rlo"))
+        self.check(f"{tag} 설정 옆에 .bak-mba · .bak-rlo 말고 다른 파일이 생기지 않는다", extra == [], extra)
+        brlo = p.with_name(p.name + ".bak-rlo")
+        self.check(f"{tag} rlo 백업은 .bak-rlo 이고 원래 · rlo 앞 · rlo 뗄 때의 설정 가운데 하나다",
+                   brlo.exists() and json.loads(brlo.read_text(encoding="utf-8")) in list(steps.values()))
         return steps
 
     # ── Stop 을 함께 ───────────────────────────────────────────────────────

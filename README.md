@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.3.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.4.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -100,7 +100,17 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
 - **기본 목적은 DC `agent_tool_call`**(BD-123): 필수는 `agent.execution_health` 하나, 나머지는 선택. `purpose=` · `--purpose` 로 바꿀 수 있다.
 - **지금 호출을 빼고 평가한다**(BD-124): 훅 입력 `tool_use_id` 와 같은 `tool.start` 와 그 `tool.end` 를 뺀다. 그 줄이 훅 순간
   transcript 에 있을지는 결정적이지 않다(T19). 나란히 부른 **다른** 호출은 남긴다(결과를 아직 못 본 앞 호출 → 닫는 쪽).
-- **Claude Code 명령 훅**: [`examples/claude_code_settings.json`](examples/claude_code_settings.json). 명령은
+- **깔기 · 떼기**(`~/.claude/settings.json`, `--settings` 로 바꾼다):
+
+  ```
+  python -m rlo.hooks install-hook --model <action-model/1 JSON> [--mode shadow|enforce] [--grant Bash] [--record <JSONL>]
+  python -m rlo.hooks uninstall-hook
+  ```
+
+  PreToolUse(matcher `*`) · Stop · SessionEnd 에 **사건마다 하나만** 둔다(다시 깔면 그 자리에서 바꾼다). 남의 훅 · 다른 칸은
+  건드리지 않는다. 바뀔 때만 쓰고, 쓰기 전 설정을 `<설정>.bak-rlo` 로 남긴다. 설정이 JSON 이 아니거나 모형이 읽히지 않으면
+  아무것도 쓰지 않고 실패한다(종료 1).
+- **Claude Code 명령 훅을 손으로**: [`examples/claude_code_settings.json`](examples/claude_code_settings.json). 명령은
   `python -m rlo.hooks --model <action-model/1 JSON> --mode shadow|enforce --grant <도구> [--record <JSONL>]`.
   모형의 예는 `rlo/data/cc_tools_model.json`(Bash · Read · Write — 문서로 확인한 칸만).
 - **Agent SDK(Python)**: [`examples/agent_sdk.py`](examples/agent_sdk.py). `guard_hooks(model, mode=…).callback` 을
@@ -132,9 +142,9 @@ transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
 | 깔기 순서 MBA → rlo, rlo → MBA | 어느 순서든 두 훅과 원래 사용자 훅 · 다른 칸이 모두 남는다. MBA 를 다시 깔아도 하나만 남는다 |
 | 하나 떼기 | 하나를 떼면 다른 하나를 깐 뒤의 설정과 같다. 둘 다 떼면 원래 설정과 같다 |
 | `Stop` 을 함께(나란히) | 둘 다 출력 없음 · 종료 0 — 혼자일 때와 같다. MBA 원장의 stop 기록도 같다. 서로 막지 않는다 |
-| `.bak-mba` | rlo 는 그 파일을 만들거나 고치지 않는다. 다만 **rlo 를 먼저 깔고 MBA 를 깔면 `.bak-mba` 에 rlo 항목이 든다**(MBA 가 바꾸기 전 설정을 백업한다). rlo 를 뗀 뒤 `.bak-mba` 로 되돌리면 rlo 훅이 다시 생긴다 |
+| `.bak-mba` · `.bak-rlo` | rlo 는 `.bak-mba` 를 만들거나 고치지 않고 자기 백업은 `.bak-rlo` 에 둔다. 다만 **rlo 를 먼저 깔고 MBA 를 깔면 `.bak-mba` 에 rlo 항목이 든다**(MBA 가 바꾸기 전 설정을 백업한다). rlo 를 뗀 뒤 `.bak-mba` 로 되돌리면 rlo 훅이 다시 생긴다 |
 
-rlo 는 설치 명령이 없다 — `examples/claude_code_settings.json` 의 묶음을 사건마다 끝에 덧붙여 깔고, 명령에 `rlo.hooks` 가 든 훅을 빼서 뗀다(위 확인은 이 방법으로 했다).
+rlo 는 `python -m rlo.hooks install-hook | uninstall-hook` 으로 깔고 뗐다(위 확인, 27/27). rlo 의 백업은 `.bak-rlo` 라 MBA 의 `.bak-mba` 와 겹치지 않는다.
 실제 Claude Code 실행으로는 재보지 않았다.
 
 ## 아직 하지 않은 것
