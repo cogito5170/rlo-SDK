@@ -1,0 +1,96 @@
+"""변이 시험 -- 지켜야 할 것을 하나씩 깨뜨린 사본에서 시험 전체를 돌려, 모두 빨개지는지(RED) 본다.
+
+    python -B eval/mutation.py          (rlo-sdk 의 의존이 깔린 환경에서. rlo 자신은 깔려 있지 않아도 된다)
+
+사본마다 저장소를 임시 디렉터리에 베끼고, 그 안에서 `python -B -m unittest discover` 를 돈다(낡은 .pyc 를 쓰지 않게 -B).
+"""
+from __future__ import annotations
+
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+TEL = "89d2887768a1f230860ea6323870a747fd4323ef"
+ACT, ACT_HEAD = "3995fdb3ba487f31d841d3e11b710e64f0d523db", "2f4791e5c33df6cf19d41f139d95d74e4b86b42e"
+GUARD_REQ = '    "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",\n'
+GUARD_PIN = '    "guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c"),\n'
+
+# (이름, [(파일, 옛 글, 새 글), ...])
+MUTANTS = [
+    # guard 를 선택으로
+    ("pyproject: guard 를 extras 로", [("pyproject.toml", GUARD_REQ, ""),
+                                      ("pyproject.toml", 'sensor = [', 'guard = ["guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c"]\nsensor = [')]),
+    ("_pins: guard 를 extras 로", [("rlo/_pins.py", GUARD_PIN, ""),
+                                  ("rlo/_pins.py", 'EXTRAS = {\n', 'EXTRAS = {\n    "guard": {"guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c")},\n')]),
+    ("autonomy: guard · 실행기 · VERIFY 없이도 선다", [("rlo/autonomy.py", "        if missing:\n", "        if False:\n")]),
+    # snapshot 길을 냄
+    ("autonomy: DC 길을 꽂지 않음(snapshot 길)", [("rlo/autonomy.py", "        self.runtime.state_reader = MSStateReader(builder, purpose)\n", "")]),
+    ("autonomy: state_reader 를 끄는 자리", [("rlo/autonomy.py", "run_state=None):", "run_state=None, state_reader=True):")]),
+    ("autonomy: handle 이 결정 문맥 없이도 돎", [("rlo/autonomy.py", "        if self.runtime.state_reader is None:\n", "        if False:\n")]),
+    ("autonomy: 기본 guard_mode enforce", [("rlo/autonomy.py", 'guard_mode: str = "shadow"', 'guard_mode: str = "enforce"')]),
+    # 훅
+    ("hooks: ALLOW 에 \"allow\" 를 냄", [("rlo/hooks.py",
+        '[:500])\n            return {}\n',
+        '[:500])\n            return {"hookSpecificOutput": {"hookEventName": PRE, "permissionDecision": "allow"}}\n')]),
+    ("hooks: shadow 도 막음", [("rlo/hooks.py", 'if self.mode == ENFORCE and res.verdict != "ALLOW":', 'if res.verdict != "ALLOW":')]),
+    ("hooks: 판정 오류의 메시지가 샘", [("rlo/hooks.py", 'deny(f"guard error: {type(e).__name__}")', 'deny(f"guard error: {e}")')]),
+    ("hooks: 판정 오류를 enforce 에서도 허락", [("rlo/hooks.py", 'if self.mode == ENFORCE else {}', 'if False else {}')]),
+    ("hooks: 실행 뒤 훅이 판정함", [("rlo/hooks.py", "        self.observe(input_data)\n        return {}\n",
+                                    "        self.observe(input_data)\n        return self.pre_tool_use(input_data)\n")]),
+    ("hooks: 모르는 모드를 받음", [("rlo/hooks.py", "        if mode not in (SHADOW, ENFORCE):\n", "        if False:\n")]),
+    # 판본 목록
+    ("_pins: Telemetry sha 가 pyproject 와 어긋남", [("rlo/_pins.py", TEL, "0" * 40)]),
+    ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
+    ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
+    ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.1.0"', '__version__ = "0.2.0"')]),
+    # 예제
+    ("example: 모드를 입구에 넘기지 않음", [("rlo/example.py", "                           guard_mode=mode, l0=sink)", "                           l0=sink)")]),
+]
+
+
+def run(tree: pathlib.Path) -> int:
+    return subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-t", "."], cwd=tree,
+                          capture_output=True, text=True).returncode
+
+
+def copy() -> pathlib.Path:
+    d = pathlib.Path(tempfile.mkdtemp(prefix="rlo-mut-"))
+    for name in ("rlo", "tests", "pyproject.toml"):
+        src = ROOT / name
+        (shutil.copytree if src.is_dir() else shutil.copy)(src, d / name)
+    return d
+
+
+def main() -> int:
+    base = copy()
+    try:
+        if run(base) != 0:
+            print("기준 사본이 초록이 아니다 -- 변이를 돌리지 않는다")
+            return 2
+    finally:
+        shutil.rmtree(base)
+    red = 0
+    for name, edits in MUTANTS:
+        d = copy()
+        try:
+            for f, old, new in edits:
+                p = d / f
+                text = p.read_text(encoding="utf-8")
+                if text.count(old) != 1:
+                    raise SystemExit(f"변이 '{name}': {f} 에서 옛 글을 한 번 찾지 못함")
+                p.write_text(text.replace(old, new), encoding="utf-8")
+            rc = run(d)
+        finally:
+            shutil.rmtree(d)
+        red += rc != 0
+        print(f"{'RED  ' if rc else 'GREEN'} {name}")
+    print(f"{red}/{len(MUTANTS)} RED")
+    return 0 if red == len(MUTANTS) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
