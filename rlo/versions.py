@@ -1,6 +1,6 @@
 """`versions()` -- 고정 목록과 동결 계약 판본(BD-120 (4)). 공개 경계의 판본을 한곳에서 본다.
 
-    {"sdk": "0.1.0",
+    {"sdk": "rlo-sdk/0.1.0",                             판본 문자열(SDK.md §6). __version__ 은 "0.1.0"
      "pins":      {이름: 커밋 sha}                      rlo/_pins.py 의 필수 고정
      "extras":    {extras: {이름: 커밋 sha}}            선택 설치의 고정
      "installed": {이름: 커밋 sha | None}               pip 가 실제로 받은 커밋(direct_url.json). git 이 아닌 설치 · 없으면 None
@@ -49,7 +49,7 @@ def _contract(module: str, attr: str) -> "str | None":
 def versions() -> dict:
     every = {**_pins.REQUIRED, **{k: v for group in _pins.EXTRAS.values() for k, v in group.items()}}
     return {
-        "sdk": __version__,
+        "sdk": f"rlo-sdk/{__version__}",
         "pins": {name: pin[2] for name, pin in _pins.REQUIRED.items()},
         "extras": {extra: {name: pin[2] for name, pin in group.items()} for extra, group in _pins.EXTRAS.items()},
         "installed": {name: _installed_commit(pin[0]) for name, pin in every.items()},

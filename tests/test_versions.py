@@ -41,7 +41,7 @@ def _extras():
 class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
-        self.assertEqual(v["sdk"], rlo.__version__)
+        self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다

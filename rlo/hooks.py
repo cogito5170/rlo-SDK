@@ -1,4 +1,4 @@
-"""에이전트 SDK 훅 어댑터 -- 시제품 action `720b7d9` `sdk_draft/hooks.py` 를 옮겼다(BD-120 (5), 설계는 action docs/SDK.md §5).
+"""에이전트 SDK 훅 어댑터 -- 시제품 action `9642bb3` `sdk_draft/hooks.py` 를 옮겼다(BD-120 (5), 설계는 action docs/SDK.md §5).
 공식 문서로 확인한 입출력 꼴만 쓴다. 판정 `judge` 를 실제 상태로 잇는 일은 S2-7b 다 -- 지금은 주입받는다.
 
     PreToolUse   입력 {session_id, transcript_path, cwd, permission_mode, hook_event_name, tool_name, tool_input,

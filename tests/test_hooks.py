@@ -1,4 +1,4 @@
-"""훅 어댑터(BD-120 (5)) -- 시제품 action `720b7d9` tests/test_sdk_draft.py::Hooks 를 옮겼다. 진짜 guard · 공식 문서의 입력 예 그대로."""
+"""훅 어댑터(BD-120 (5)) -- 시제품 action `9642bb3` tests/test_sdk_draft.py::Hooks 를 옮겼다. 진짜 guard · 공식 문서의 입력 예 그대로."""
 import asyncio
 import io
 import json

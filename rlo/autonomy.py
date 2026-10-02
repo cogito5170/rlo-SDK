@@ -1,4 +1,4 @@
-"""입구 `Autonomy` -- MS `Runtime` 을 감싸는 얇은 층(BD-120 (1)). 시제품 action `720b7d9` `sdk_draft/autonomy.py` 를 옮겼다.
+"""입구 `Autonomy` -- MS `Runtime` 을 감싸는 얇은 층(BD-120 (1)). 시제품 action `9642bb3` `sdk_draft/autonomy.py` 를 옮겼다.
 
     a = Autonomy.from_spec(spec, observations, actions=[...], llm=provider)    # 세계 · 행동 · LLM 은 반드시 받는다
     a.open_session("s", {"token_budget": 1000})

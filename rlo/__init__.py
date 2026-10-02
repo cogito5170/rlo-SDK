@@ -1,4 +1,4 @@
-"""rlo SDK -- 일곱 층을 한 입구로 묶는다(BD-119 · BD-120). 설계: action `720b7d9` docs/SDK.md.
+"""rlo SDK -- 일곱 층을 한 입구로 묶는다(BD-119 · BD-120). 설계: action `9642bb3` docs/SDK.md.
 
 공개(SDK.md §3):
     Autonomy · Result       입구(rlo.autonomy)

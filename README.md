@@ -1,7 +1,7 @@
 # rlo-SDK
 
 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 **한 입구**로 묶는 SDK. 배포 이름 `rlo-sdk`, import 이름 `rlo`.
-설계는 action `720b7d9` [`docs/SDK.md`](https://github.com/cogito5170/action/blob/720b7d9/docs/SDK.md), 결정은 baseline BD-119 · BD-120.
+설계는 action `9642bb3` [`docs/SDK.md`](https://github.com/cogito5170/action/blob/9642bb3/docs/SDK.md), 결정은 baseline BD-119 · BD-120.
 
 ```
 pip install "git+https://github.com/cogito5170/rlo-SDK@<sha>"            # 입구 + 훅 어댑터
@@ -54,7 +54,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "0.1.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.1.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
