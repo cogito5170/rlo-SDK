@@ -120,6 +120,23 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
 실패 뒤에 막고 싶으면 운영자가 행동 명세의 사전조건(A6)으로 둔다(BD-123). `execution_control` 을 꽂으면 Claude Code
 transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
 
+## MBA-frontend 와 함께 쓰기
+
+[`cogito5170/MBA`](https://github.com/cogito5170/MBA) 의 `mba-frontend`(토큰 절약 앞단)와 나란히 쓸 수 있다. SDK 에 넣지 않고 **각자 깐다**(BD-125).
+확인한 판: MBA `0879c2b` · rlo-sdk `0.3.0`. 재현: `python eval/with_mba.py --mba-frontend <mba-frontend>`(임시 HOME 에서만 돈다, `claude -p` 를 부르지 않는다).
+
+| 확인한 것 | 결과 |
+|---|---|
+| 한 가상환경에 함께 설치(`rlo-sdk[sensor]` + `mba`) | 된다. import 이름이 겹치지 않는다(`rlo` · `mba`) |
+| 붙는 사건 | MBA: `UserPromptSubmit` · `Stop`. rlo: `PreToolUse` · `Stop` · `SessionEnd`. **겹치는 것은 `Stop` 하나** |
+| 깔기 순서 MBA → rlo, rlo → MBA | 어느 순서든 두 훅과 원래 사용자 훅 · 다른 칸이 모두 남는다. MBA 를 다시 깔아도 하나만 남는다 |
+| 하나 떼기 | 하나를 떼면 다른 하나를 깐 뒤의 설정과 같다. 둘 다 떼면 원래 설정과 같다 |
+| `Stop` 을 함께(나란히) | 둘 다 출력 없음 · 종료 0 — 혼자일 때와 같다. MBA 원장의 stop 기록도 같다. 서로 막지 않는다 |
+| `.bak-mba` | rlo 는 그 파일을 만들거나 고치지 않는다. 다만 **rlo 를 먼저 깔고 MBA 를 깔면 `.bak-mba` 에 rlo 항목이 든다**(MBA 가 바꾸기 전 설정을 백업한다). rlo 를 뗀 뒤 `.bak-mba` 로 되돌리면 rlo 훅이 다시 생긴다 |
+
+rlo 는 설치 명령이 없다 — `examples/claude_code_settings.json` 의 묶음을 사건마다 끝에 덧붙여 깔고, 명령에 `rlo.hooks` 가 든 훅을 빼서 뗀다(위 확인은 이 방법으로 했다).
+실제 Claude Code 실행으로는 재보지 않았다.
+
 ## 아직 하지 않은 것
 
 - API(서비스) — OQ-19 · OQ-23 이 먼저다.
