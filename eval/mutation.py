@@ -57,6 +57,7 @@ MUTANTS = [
     ("hooks: 기록에 도구 입력 평문", [("rlo/hooks.py", '"tool_name": it.action,', '"tool_name": it.action, "args": it.args,')]),
     ("hooks: 기본 목적이 execution_control 이 아님", [("rlo/hooks.py", 'PURPOSE = "execution_control"', 'PURPOSE = "agent_context"')]),
     ("hooks: 명령 훅 설정 오류에 enforce 도 허락", [("rlo/hooks.py", "        if a.mode == ENFORCE and ev == PRE:\n", "        if False:\n")]),
+    ("hooks: Sensor 없이도 훅이 섬", [("rlo/hooks.py", "        except ImportError as e:\n            raise ImportError(", "        except ImportError as e:\n            pass\n        if False:\n            raise ImportError(")]),
     ("hooks: 모르는 모드를 받음", [("rlo/hooks.py", "        if mode not in (SHADOW, ENFORCE):\n", "        if False:\n")]),
     # 판본 목록
     ("_pins: Telemetry sha 가 pyproject 와 어긋남", [("rlo/_pins.py", TEL, "0" * 40)]),

@@ -18,6 +18,13 @@ from action.spec import ActionModel
 from rlo import hooks
 from rlo.example_hooks import data, hook_input, now_after
 
+try:
+    import llmsensor  # noqa: F401
+    SENSOR = True
+except ImportError:
+    SENSOR = False
+NEEDS_SENSOR = unittest.skipUnless(SENSOR, "훅 판정은 Sensor 가 필요하다 -- rlo-sdk[sensor] 로 깔면 돈다")
+
 MODEL = ActionModel.from_dict(json.loads(data("cc_tools_model.json").read_text(encoding="utf-8")))
 PRE_ALL = ("normal", "normal_no_current_use", "after_failure", "read_after_failure", "parallel", "first_call")
 
@@ -45,6 +52,7 @@ class Base(unittest.TestCase):
         return out["hookSpecificOutput"]["permissionDecisionReason"].split("(", 1)[1].split(")", 1)[0]
 
 
+@NEEDS_SENSOR
 class DefaultPurposeMeasured(Base):
     """기본 목적 execution_control 을 그대로 이었을 때 **잰 그대로**: Claude Code transcript 에는 요금 한도 사용률과 정체 문턱이
     없어 필수 상태 둘이 늘 UNKNOWN 이다 -> 문맥이 늘 불완전 -> enforce 에서 위험 도구(Bash, external)는 늘 D 로 막힌다."""
@@ -70,6 +78,7 @@ class DefaultPurposeMeasured(Base):
                 self.assertEqual(self.records[0][0], "guard")
 
 
+@NEEDS_SENSOR
 class SatisfiablePurpose(Base):
     """필수 상태를 transcript 로 알 수 있는 목적을 꽂으면(`purpose=`) 판정 길이 상태대로 가른다."""
 
@@ -116,6 +125,7 @@ class SatisfiablePurpose(Base):
         self.assertEqual(rec["tool_use_id"], "tu2")
 
 
+@NEEDS_SENSOR
 class Collecting(Base):
     def test_reads_the_transcript_again_on_every_pre_tool_use(self):
         d = pathlib.Path(tempfile.mkdtemp())
@@ -160,6 +170,7 @@ class Collecting(Base):
         self.assertEqual(self.records, [("collect_error", {"event": "Stop", "exception": "FileNotFoundError"})])
 
 
+@NEEDS_SENSOR
 class Closing(Base):
     def test_missing_transcript_closes_only_in_enforce(self):
         bad = dict(hook_input("normal"), transcript_path="/nonexistent/t.jsonl")
@@ -190,6 +201,7 @@ class Closing(Base):
         self.assertEqual(got["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
+@NEEDS_SENSOR
 class CommandHook(unittest.TestCase):
     """`python -m rlo.hooks` -- Claude Code 명령 훅 길(표준입력 → 표준출력, 종료 0)."""
 
@@ -229,6 +241,25 @@ class CommandHook(unittest.TestCase):
         from rlo import example_hooks
         with mock.patch("builtins.print"):
             self.assertEqual(example_hooks.main(), 0)
+
+
+
+class WithoutSensor(unittest.TestCase):
+    """Sensor 없이 깔린 곳(rlo-sdk 기본): 훅은 서지 않고, 명령 훅은 enforce 의 PreToolUse 를 막는다(닫는 쪽)."""
+
+    def test_judge_refuses_to_stand(self):
+        with mock.patch.dict(sys.modules, {"llmsensor": None}):
+            with self.assertRaises(ImportError) as e:
+                hooks.guard_hooks(MODEL, mode="enforce")
+        self.assertIn("rlo-sdk[sensor]", str(e.exception))
+
+    def test_command_hook_closes_in_enforce(self):
+        out = io.StringIO()
+        with mock.patch.dict(sys.modules, {"llmsensor": None}):
+            hooks.main(["--model", str(data("cc_tools_model.json")), "--mode", "enforce"],
+                       stdin=io.StringIO(json.dumps(hook_input("normal"))), stdout=out)
+        self.assertEqual(json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecisionReason"],
+                         "rlo hook config error: ImportError")
 
 
 if __name__ == "__main__":

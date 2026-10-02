@@ -41,7 +41,15 @@ class ClaudeCodeSettings(unittest.TestCase):
                 self.assertIsNone(a.now_ms)                                         # 실제 훅은 지금을 고정하지 않는다
 
 
+try:
+    import llmsensor  # noqa: F401
+    SENSOR = True
+except ImportError:
+    SENSOR = False
+
+
 @unittest.skipUnless(EX.is_dir(), "examples/ 가 옆에 없다 -- RLO_REPO")
+@unittest.skipUnless(SENSOR, "훅은 Sensor 가 필요하다 -- rlo-sdk[sensor]")
 class AgentSdkExample(unittest.TestCase):
     def setUp(self):
         stub = types.ModuleType("claude_agent_sdk")

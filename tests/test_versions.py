@@ -90,6 +90,14 @@ class Manifest(unittest.TestCase):
             self.assertIsNone(rlo.versions()["installed"]["nowhere"])
 
 
+def _installed(dist: str) -> bool:
+    try:
+        metadata.distribution(dist)
+        return True
+    except metadata.PackageNotFoundError:
+        return False
+
+
 def _norm(name: str) -> str:
     return name.strip().lower().replace("_", "-")
 
@@ -117,7 +125,8 @@ class PinGraph(unittest.TestCase):
                     self.assertEqual(" ".join(r.split()), mine[name], f"{dist} 가 요구하는 {name}")
         if checked == 0:
             self.skipTest("고정 배포가 깔려 있지 않다")
-        self.assertGreaterEqual(checked, 4)          # guard · health · ms → action, llmsensor → Telemetry
+        want = 3 + (1 if _installed("llmsensor") else 0)          # guard · health · ms → action, (llmsensor → Telemetry)
+        self.assertEqual(checked, want)
 
 
 class FrozenContracts(unittest.TestCase):
