@@ -1,0 +1,927 @@
+{
+ "runs": [
+  {
+   "mode": "shadow",
+   "scenario": "bash_fail_then_bash",
+   "rc": 0,
+   "wall_ms": 7744,
+   "claude": {
+    "is_error": false,
+    "num_turns": 4,
+    "duration_ms": 6424,
+    "duration_api_ms": 4982,
+    "total_cost_usd": 0.0257888,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 9,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01DwzB6Whk7B2SL2MPx4Lze3",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 212.5,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_011hkd8NRYEEu5iw6kiNwfNd",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 187.3,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01Xy4Np3dC57g2D9vFgrL88V",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 140.0,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "UNRESOLVED_FAILURES",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 3,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 109.7,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 4,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 113.5,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 3,
+    "names": {
+     "Bash": 3
+    },
+    "results": {
+     "toolu_01DwzB6Whk7B2SL2MPx4Lze3": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_011hkd8NRYEEu5iw6kiNwfNd": {
+      "name": "Bash",
+      "is_error": true,
+      "mentions_guard": false
+     },
+     "toolu_01Xy4Np3dC57g2D9vFgrL88V": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     }
+    },
+    "no_result": []
+   }
+  },
+  {
+   "mode": "shadow",
+   "scenario": "read_grep_edit",
+   "rc": 0,
+   "wall_ms": 8273,
+   "claude": {
+    "is_error": false,
+    "num_turns": 4,
+    "duration_ms": 7239,
+    "duration_api_ms": 6428,
+    "total_cost_usd": 0.025057,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Read",
+     "tool_use_id": "toolu_01KVNjmKDHkQ1heuYpprUDFZ",
+     "tool_input_keys": [
+      "file_path"
+     ],
+     "ms": 134.6,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Grep",
+     "tool_use_id": "toolu_011eKX5bGXC4yDvmtY5yR5os",
+     "tool_input_keys": [
+      "path",
+      "pattern"
+     ],
+     "ms": 125.2,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "DENY",
+      "rule": "A1",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "PreToolUse",
+     "tool_name": "Edit",
+     "tool_use_id": "toolu_016QkCA5bvJxb5iJjE7aRkjU",
+     "tool_input_keys": [
+      "file_path",
+      "new_string",
+      "old_string",
+      "replace_all"
+     ],
+     "ms": 125.8,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "DENY",
+      "rule": "A1",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 3,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 128.4,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 4,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 118.7,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Read",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Grep",
+     "verdict": "DENY",
+     "rule": "A1",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Edit",
+     "verdict": "DENY",
+     "rule": "A1",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 3,
+    "names": {
+     "Read": 1,
+     "Grep": 1,
+     "Edit": 1
+    },
+    "results": {
+     "toolu_01KVNjmKDHkQ1heuYpprUDFZ": {
+      "name": "Read",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_011eKX5bGXC4yDvmtY5yR5os": {
+      "name": "Grep",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_016QkCA5bvJxb5iJjE7aRkjU": {
+      "name": "Edit",
+      "is_error": false,
+      "mentions_guard": false
+     }
+    },
+    "no_result": []
+   }
+  },
+  {
+   "mode": "shadow",
+   "scenario": "parallel_bash",
+   "rc": 0,
+   "wall_ms": 4639,
+   "claude": {
+    "is_error": false,
+    "num_turns": 3,
+    "duration_ms": 3449,
+    "duration_api_ms": 2903,
+    "total_cost_usd": 0.0198341,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01JN4cPZQSxVs8KhqdbwQRB6",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 110.5,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_014Gwimp1RapqRYe42t4zk4C",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 126.4,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 111.2,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 3,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 109.8,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 2,
+    "names": {
+     "Bash": 2
+    },
+    "results": {
+     "toolu_01JN4cPZQSxVs8KhqdbwQRB6": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_014Gwimp1RapqRYe42t4zk4C": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     }
+    },
+    "no_result": []
+   }
+  },
+  {
+   "mode": "enforce",
+   "scenario": "bash_fail_then_bash",
+   "rc": 0,
+   "wall_ms": 8693,
+   "claude": {
+    "is_error": false,
+    "num_turns": 4,
+    "duration_ms": 7578,
+    "duration_api_ms": 6557,
+    "total_cost_usd": 0.026131500000000002,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_018War3cXDsqoBGXPXEQBh9z",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 128.0,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01WPayBeZq6sDwusJWnvTAa2",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 115.9,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01T8M8LNuTsdXa4bBzYVWBEd",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 128.7,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "UNRESOLVED_FAILURES",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 3,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 122.4,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 4,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 118.7,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 3,
+    "names": {
+     "Bash": 3
+    },
+    "results": {
+     "toolu_018War3cXDsqoBGXPXEQBh9z": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_01WPayBeZq6sDwusJWnvTAa2": {
+      "name": "Bash",
+      "is_error": true,
+      "mentions_guard": false
+     },
+     "toolu_01T8M8LNuTsdXa4bBzYVWBEd": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     }
+    },
+    "no_result": []
+   }
+  },
+  {
+   "mode": "enforce",
+   "scenario": "read_grep_edit",
+   "rc": 0,
+   "wall_ms": 15296,
+   "claude": {
+    "is_error": false,
+    "num_turns": 4,
+    "duration_ms": 13868,
+    "duration_api_ms": 13111,
+    "total_cost_usd": 0.026103399999999995,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 366,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Read",
+     "tool_use_id": "toolu_01Cd54F6Ndqy1g9BtyD6mzCg",
+     "tool_input_keys": [
+      "file_path"
+     ],
+     "ms": 121.8,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Grep",
+     "tool_use_id": "toolu_01UK72RRrvYdbusHHHWJtDmN",
+     "tool_input_keys": [
+      "path",
+      "pattern"
+     ],
+     "ms": 118.8,
+     "rc": 0,
+     "decision": "deny",
+     "reason_head": "guard DENY(A1): [A1] 행동 Grep 는 이 문맥에서 제안되지 않았다",
+     "replay": {
+      "verdict": "DENY",
+      "rule": "A1",
+      "complete": true,
+      "execution_health": [
+       "NO_FAILURE_OBSERVED",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "PreToolUse",
+     "tool_name": "Edit",
+     "tool_use_id": "toolu_011fxhKaLiFev56iYfAzissZ",
+     "tool_input_keys": [
+      "file_path",
+      "new_string",
+      "old_string",
+      "replace_all"
+     ],
+     "ms": 126.3,
+     "rc": 0,
+     "decision": "deny",
+     "reason_head": "guard DENY(A1): [A1] 행동 Edit 는 이 문맥에서 제안되지 않았다",
+     "replay": {
+      "verdict": "DENY",
+      "rule": "A1",
+      "complete": true,
+      "execution_health": [
+       "UNRESOLVED_FAILURES",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 3,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 119.5,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 4,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 165.3,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Read",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Grep",
+     "verdict": "DENY",
+     "rule": "A1",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Edit",
+     "verdict": "DENY",
+     "rule": "A1",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 3,
+    "names": {
+     "Read": 1,
+     "Grep": 1,
+     "Edit": 1
+    },
+    "results": {
+     "toolu_01Cd54F6Ndqy1g9BtyD6mzCg": {
+      "name": "Read",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_01UK72RRrvYdbusHHHWJtDmN": {
+      "name": "Grep",
+      "is_error": true,
+      "mentions_guard": true
+     },
+     "toolu_011fxhKaLiFev56iYfAzissZ": {
+      "name": "Edit",
+      "is_error": true,
+      "mentions_guard": true
+     }
+    },
+    "no_result": []
+   }
+  },
+  {
+   "mode": "enforce",
+   "scenario": "parallel_bash",
+   "rc": 0,
+   "wall_ms": 5665,
+   "claude": {
+    "is_error": false,
+    "num_turns": 3,
+    "duration_ms": 4296,
+    "duration_api_ms": 3780,
+    "total_cost_usd": 0.019689099999999998,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8,
+   "hooks": [
+    {
+     "n": 0,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01CBiCzH6TeoiVNkM2sajqj4",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 123.5,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "ALLOW",
+      "rule": "0",
+      "complete": true,
+      "execution_health": [
+       "NO_TOOL_RUN_YET",
+       "INFERRED"
+      ]
+     }
+    },
+    {
+     "n": 1,
+     "event": "PreToolUse",
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_012idq3YHeS7yqUuUKgM6jNp",
+     "tool_input_keys": [
+      "command",
+      "description"
+     ],
+     "ms": 119.8,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": {
+      "verdict": "DENY",
+      "rule": "D",
+      "complete": false,
+      "execution_health": [
+       null,
+       "INVALID"
+      ]
+     }
+    },
+    {
+     "n": 2,
+     "event": "Stop",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 107.6,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    },
+    {
+     "n": 3,
+     "event": "SessionEnd",
+     "tool_name": null,
+     "tool_use_id": null,
+     "tool_input_keys": [],
+     "ms": 134.8,
+     "rc": 0,
+     "decision": null,
+     "reason_head": "",
+     "replay": null
+    }
+   ],
+   "record": [
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    },
+    {
+     "kind": "guard",
+     "tool_name": "Bash",
+     "verdict": "ALLOW",
+     "rule": "0",
+     "complete": true,
+     "missing_required": [],
+     "exception": null
+    }
+   ],
+   "transcript": {
+    "tool_uses": 2,
+    "names": {
+     "Bash": 2
+    },
+    "results": {
+     "toolu_01CBiCzH6TeoiVNkM2sajqj4": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     },
+     "toolu_012idq3YHeS7yqUuUKgM6jNp": {
+      "name": "Bash",
+      "is_error": false,
+      "mentions_guard": false
+     }
+    },
+    "no_result": []
+   }
+  }
+ ],
+ "claude_version": "2.1.288 (Claude Code)"
+}
