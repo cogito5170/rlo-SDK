@@ -38,23 +38,25 @@ ALLOWED = "Bash Read Grep Edit Glob Write"
 
 # ── 감싸기: 훅 명령 앞에 붙는다 ────────────────────────────────────────────────
 def wrap(log: str, snaps: str, real: str) -> int:
+    """훅을 감싼다. 그 순간의 transcript 사본과 '지금'(at_ms)을 훅을 돌리기 **전에** 뜬다(CMD-K8) -- 훅이 도는 동안 런타임이
+    transcript 에 더 쓴 줄이 사본에 들어가지 않게. K7 은 훅 **뒤에** 떠서 재현 1/16 이 어긋났다."""
     raw = sys.stdin.read()
-    at_ms = time.time() * 1000
-    t0 = time.perf_counter()
-    p = subprocess.run(real, shell=True, input=raw, capture_output=True, text=True)
-    ms = (time.perf_counter() - t0) * 1000
-    sys.stdout.write(p.stdout)
-    sys.stderr.write(p.stderr)
     try:
         d = json.loads(raw)
     except json.JSONDecodeError:
         d = {}
     n = sum(1 for _ in open(log, encoding="utf-8")) if os.path.exists(log) else 0
+    at_ms = time.time() * 1000
     tp = d.get("transcript_path")
     snap = None
     if tp and os.path.exists(tp):
         snap = os.path.join(snaps, f"{n:03d}.jsonl")
         shutil.copy(tp, snap)
+    t0 = time.perf_counter()
+    p = subprocess.run(real, shell=True, input=raw, capture_output=True, text=True)
+    ms = (time.perf_counter() - t0) * 1000
+    sys.stdout.write(p.stdout)
+    sys.stderr.write(p.stderr)
     out = json.loads(p.stdout) if p.stdout.strip() else {}
     hso = out.get("hookSpecificOutput", {})
     row = {"n": n, "event": d.get("hook_event_name"), "tool_name": d.get("tool_name"),

@@ -93,6 +93,33 @@ class AgentToolCall(Base):
         out = a.handle(dict(hook_input("normal"), tool_input={"command": "make", "dangerously": True}))
         self.assertEqual(self.rule(out), "A4")
 
+    def test_edit_and_grep_pass_with_measured_fields(self):
+        """K7 실제 실행에서 잰 칸(CMD-K8): Edit(local) · Grep(read) 는 정상이면 통과한다."""
+        a = self.adapter("normal", "enforce")
+        edit = {"file_path": "/work/a", "old_string": "foo", "new_string": "bar", "replace_all": False}
+        self.assertEqual(a.handle(dict(hook_input("normal"), tool_name="Edit", tool_input=edit)), {})
+        self.assertEqual(a.handle(dict(hook_input("normal"), tool_name="Edit", tool_input={k: edit[k] for k in edit
+                                                                                           if k != "replace_all"})), {})
+        self.assertEqual(a.handle(dict(hook_input("normal"), tool_name="Grep",
+                                       tool_input={"path": "/work", "pattern": "foo"})), {})
+
+    def test_edit_and_grep_with_an_unmeasured_field_are_a4(self):
+        a = self.adapter("normal", "enforce")
+        out = a.handle(dict(hook_input("normal"), tool_name="Grep",
+                            tool_input={"path": "/work", "pattern": "foo", "glob": "*.py"}))
+        self.assertEqual(self.rule(out), "A4")
+        out = a.handle(dict(hook_input("normal"), tool_name="Edit",
+                            tool_input={"file_path": "/a", "old_string": "x", "new_string": "y", "dry_run": True}))
+        self.assertEqual(self.rule(out), "A4")
+
+    def test_record_carries_input_key_names_not_values(self):
+        a = self.adapter("normal", "enforce")
+        a.handle(dict(hook_input("normal"), tool_name="Grep", tool_input={"path": "/secret/dir", "pattern": "p4ss"}))
+        rec = self.records[-1][1]
+        self.assertEqual(rec["tool_input_keys"], ["path", "pattern"])
+        self.assertNotIn("p4ss", json.dumps(rec))
+        self.assertNotIn("/secret/dir", json.dumps(rec))
+
     def test_tool_outside_the_model_is_a1(self):
         a = self.adapter("normal", "enforce")
         out = a.handle(dict(hook_input("normal"), tool_name="WebFetch", tool_input={"url": "x"}))

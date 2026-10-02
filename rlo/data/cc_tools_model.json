@@ -1,6 +1,6 @@
 {
  "schema": "action-model/1",
- "version": "cc-tools-example-1",
+ "version": "cc-tools-example-2",
  "specs": [
   {
    "schema": "action-spec/1",
@@ -29,6 +29,51 @@
    "postcondition": [],
    "window_ms": null,
    "description": "셸 명령. 칸은 hooks.md PreToolUse 입력 예의 tool_input 그대로"
+  },
+  {
+   "schema": "action-spec/1",
+   "name": "Edit",
+   "version": "1",
+   "target_model": null,
+   "params": {
+    "file_path": {
+     "type": "string"
+    },
+    "old_string": {
+     "type": "string"
+    },
+    "new_string": {
+     "type": "string"
+    },
+    "replace_all": {
+     "type": "bool",
+     "required": false
+    }
+   },
+   "preconditions": [],
+   "risk": "local",
+   "postcondition": [],
+   "window_ms": null,
+   "description": "파일 고치기. 칸은 K7 실제 실행에서 잰 것(file_path · old_string · new_string · replace_all)"
+  },
+  {
+   "schema": "action-spec/1",
+   "name": "Grep",
+   "version": "1",
+   "target_model": null,
+   "params": {
+    "path": {
+     "type": "string"
+    },
+    "pattern": {
+     "type": "string"
+    }
+   },
+   "preconditions": [],
+   "risk": "read",
+   "postcondition": [],
+   "window_ms": null,
+   "description": "찾기. 칸은 K7 실제 실행에서 잰 것(path · pattern). 그 밖의 칸은 A4 로 막힌다 -- 운영자가 잰 뒤 더한다"
   },
   {
    "schema": "action-spec/1",

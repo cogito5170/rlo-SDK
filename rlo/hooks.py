@@ -139,6 +139,7 @@ class HookAdapter:
         try:
             it, v, res, dcv = self.judge(input_data, self.mode)
             self.record("guard", {"tool_use_id": input_data.get("tool_use_id"), "tool_name": it.action,
+                                  "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
                                   "dc_id": dcv.dc_id, "complete": dcv.complete,
                                   "missing_required": list(dcv.missing_required), "result": res.to_dict()})
             if self.mode == ENFORCE and res.verdict != "ALLOW":

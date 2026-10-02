@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.4.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.4.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -112,12 +112,17 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   아무것도 쓰지 않고 실패한다(종료 1).
 - **Claude Code 명령 훅을 손으로**: [`examples/claude_code_settings.json`](examples/claude_code_settings.json). 명령은
   `python -m rlo.hooks --model <action-model/1 JSON> --mode shadow|enforce --grant <도구> [--record <JSONL>]`.
-  모형의 예는 `rlo/data/cc_tools_model.json`(Bash · Read · Write — 문서로 확인한 칸만).
+  모형의 예는 `rlo/data/cc_tools_model.json`(`cc-tools-example-2`): Bash · Read · Write 와, 실제 Claude Code 에서 잰 칸으로
+  Edit(local: `file_path` · `old_string` · `new_string` · `replace_all`) · Grep(read: `path` · `pattern`).
 - **Agent SDK(Python)**: [`examples/agent_sdk.py`](examples/agent_sdk.py). `guard_hooks(model, mode=…).callback` 을
   PreToolUse · PostToolUse · PostToolUseFailure · Stop 에 건다. Python SDK 에는 SessionEnd 가 없다(설정 파일 명령 훅으로만).
 - 응답: shadow 는 늘 `{}`. enforce 는 Guard ALLOW 가 아니면 deny. **`"allow"` 는 내지 않는다.** 판정 오류 · 설정 오류는
   enforce 에서 deny(까닭은 예외 종류만), shadow 에서 `{}`. Stop · SessionEnd 는 막지 않는다.
 - 모형에 없는 도구는 A1, 모르는 인자는 A4, 허가 없는 external · irreversible 은 A7 로 막힌다(enforce).
+- **모형 밖 도구는 enforce 에서 막힌다.** 실제 Claude Code 6 실행(K7)에서 도구 호출 16 가운데 4 가 그랬다(Grep · Edit, 그때는
+  예시 모형 밖). Glob · TodoWrite · Task · WebFetch 등은 지금도 예시 모형 밖이다. 그러니 **모형을 넓히기 전에는 shadow 로 쓴다.**
+  넓히는 법: shadow 로 돌리며 `--record` 를 켜고, 기록의 `tool_name` · `tool_input_keys`(칸 이름만, 값은 싣지 않는다)를 보고
+  실제로 나온 도구와 칸만 모형에 더한다. 재지 않고 추측한 칸은 A4 오판을 숨긴다.
 
 ### 판정 (잰 것 — `tests/test_hooks.py`, enforce, `--grant Bash`)
 
@@ -125,7 +130,9 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
 |---|---|---|
 | 앞 호출 성공 · 실패 · 세션 첫 호출(지금 줄이 있든 없든) | `{}` | `execution_health` 를 안다(실패 값만으로는 막지 않는다, BD-123) |
 | 나란히 부른 · 결과를 못 본 앞 호출이 있음 | deny D | `execution_health` 모름 → 문맥 불완전 |
-| Read(read 등급) | `{}` | D 는 external · irreversible 만 본다 |
+| Read · Grep(read) · Edit(local), 잰 칸만 | `{}` | D 는 external · irreversible 만 본다 |
+| 잰 적 없는 칸이 든 Edit · Grep | deny A4 | 모형에 없는 인자 |
+| 모형 밖 도구(Glob · WebFetch …) | deny A1 | 모형에 없는 행동 |
 
 실패 뒤에 막고 싶으면 운영자가 행동 명세의 사전조건(A6)으로 둔다(BD-123). `execution_control` 을 꽂으면 Claude Code
 transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
