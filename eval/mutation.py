@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TEL = "89d2887768a1f230860ea6323870a747fd4323ef"
+TEL = "35e8119968758becae94f226ce9ee0168967086e"
 ACT, ACT_HEAD = "3995fdb3ba487f31d841d3e11b710e64f0d523db", "2f4791e5c33df6cf19d41f139d95d74e4b86b42e"
 GUARD_REQ = '    "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",\n'
 GUARD_PIN = '    "guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c"),\n'
@@ -28,8 +28,9 @@ MUTANTS = [
     ("autonomy: guard · 실행기 · VERIFY 없이도 선다", [("rlo/autonomy.py", "        if missing:\n", "        if False:\n")]),
     # snapshot 길을 냄
     ("autonomy: DC 길을 꽂지 않음(snapshot 길)", [("rlo/autonomy.py", "        self.runtime.state_reader = MSStateReader(builder, purpose)\n", "")]),
-    ("autonomy: state_reader 를 끄는 자리", [("rlo/autonomy.py", "run_state=None):", "run_state=None, state_reader=True):")]),
+    ("autonomy: state_reader 를 끄는 자리", [("rlo/autonomy.py", "run_state=None, risky=None):", "run_state=None, risky=None, state_reader=True):")]),
     ("autonomy: handle 이 결정 문맥 없이도 돎", [("rlo/autonomy.py", "        if self.runtime.state_reader is None:\n", "        if False:\n")]),
+    ("autonomy: risky 를 넘기지 않음", [("rlo/autonomy.py", "run_state=run_state, risky=risky, **kw)", "run_state=run_state, **kw)")]),
     ("autonomy: 기본 guard_mode enforce", [("rlo/autonomy.py", 'guard_mode: str = "shadow"', 'guard_mode: str = "enforce"')]),
     # 훅
     ("hooks: ALLOW 에 \"allow\" 를 냄", [("rlo/hooks.py",
@@ -38,16 +39,34 @@ MUTANTS = [
     ("hooks: shadow 도 막음", [("rlo/hooks.py", 'if self.mode == ENFORCE and res.verdict != "ALLOW":', 'if res.verdict != "ALLOW":')]),
     ("hooks: 판정 오류의 메시지가 샘", [("rlo/hooks.py", 'deny(f"guard error: {type(e).__name__}")', 'deny(f"guard error: {e}")')]),
     ("hooks: 판정 오류를 enforce 에서도 허락", [("rlo/hooks.py", 'if self.mode == ENFORCE else {}', 'if False else {}')]),
-    ("hooks: 실행 뒤 훅이 판정함", [("rlo/hooks.py", "        self.observe(input_data)\n        return {}\n",
-                                    "        self.observe(input_data)\n        return self.pre_tool_use(input_data)\n")]),
+    ("hooks: 실행 뒤 훅이 판정함", [("rlo/hooks.py", "        self.observe(input_data)                   # 거두지 않는다",
+                                    "        return self.pre_tool_use(input_data)  # 거두지 않는다")]),
+    ("hooks: 실행 뒤 훅이 거둠", [("rlo/hooks.py", "        self.observe(input_data)                   # 거두지 않는다",
+                                  "        self.observe(input_data); self.judge.collect(input_data)  # 거두지 않는다")]),
+    ("hooks: 거둔 것을 다시 씀(다시 거두지 않음)", [("rlo/hooks.py",
+        "        return run, from_l0(from_cc_jsonl(path, run), clock=self.clock, **kw)\n",
+        "        if not hasattr(self, '_memo'):\n            self._memo = from_l0(from_cc_jsonl(path, run), clock=self.clock, **kw)\n"
+        "        return run, self._memo\n")]),
+    ("hooks: Stop 이 막음", [("rlo/hooks.py", "            self.record(\"collect_error\", {\"event\": ev, \"exception\": type(e).__name__})\n        return {}\n",
+                            "            self.record(\"collect_error\", {\"event\": ev, \"exception\": type(e).__name__})\n"
+                            "        return deny(\"stop\")\n")]),
+    ("hooks: Stop · SessionEnd 에서 거두지 않음", [("rlo/hooks.py", "        if ev in (STOP, SESSION_END):\n            return self.end(input_data)\n", "")]),
+    ("hooks: 모형의 도구를 내놓지 않음", [("rlo/hooks.py", "offers = {name: [None] for name in self.gmodel.specs}", "offers = {}")]),
+    ("hooks: 의도가 다른 문맥 id 를 가짐", [("rlo/hooks.py", "intent_material(input_data, dcv.dc_id, self.policy)",
+                                          "intent_material(input_data, 'dc-0000000000000000', self.policy)")]),
+    ("hooks: 기록에 도구 입력 평문", [("rlo/hooks.py", '"tool_name": it.action,', '"tool_name": it.action, "args": it.args,')]),
+    ("hooks: 기본 목적이 execution_control 이 아님", [("rlo/hooks.py", 'PURPOSE = "execution_control"', 'PURPOSE = "agent_context"')]),
+    ("hooks: 명령 훅 설정 오류에 enforce 도 허락", [("rlo/hooks.py", "        if a.mode == ENFORCE and ev == PRE:\n", "        if False:\n")]),
     ("hooks: 모르는 모드를 받음", [("rlo/hooks.py", "        if mode not in (SHADOW, ENFORCE):\n", "        if False:\n")]),
     # 판본 목록
     ("_pins: Telemetry sha 가 pyproject 와 어긋남", [("rlo/_pins.py", TEL, "0" * 40)]),
     ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
     ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
     ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
-    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.1.0"', '__version__ = "0.2.0"')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.2.0"', '__version__ = "0.3.0"')]),
     # 예제
+    ("examples: 설정 예가 enforce", [("examples/claude_code_settings.json", "--mode shadow --grant Bash", "--mode enforce --grant Bash")]),
+    ("examples: Agent SDK 예가 SessionEnd 를 검", [("examples/agent_sdk.py", '"PostToolUseFailure", "Stop")', '"PostToolUseFailure", "Stop", "SessionEnd")')]),
     ("example: 모드를 입구에 넘기지 않음", [("rlo/example.py", "                           guard_mode=mode, l0=sink)", "                           l0=sink)")]),
 ]
 
@@ -59,7 +78,7 @@ def run(tree: pathlib.Path) -> int:
 
 def copy() -> pathlib.Path:
     d = pathlib.Path(tempfile.mkdtemp(prefix="rlo-mut-"))
-    for name in ("rlo", "tests", "pyproject.toml"):
+    for name in ("rlo", "tests", "examples", "pyproject.toml"):
         src = ROOT / name
         (shutil.copytree if src.is_dir() else shutil.copy)(src, d / name)
     return d

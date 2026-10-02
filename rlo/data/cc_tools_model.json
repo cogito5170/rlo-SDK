@@ -1,0 +1,69 @@
+{
+ "schema": "action-model/1",
+ "version": "cc-tools-example-1",
+ "specs": [
+  {
+   "schema": "action-spec/1",
+   "name": "Bash",
+   "version": "1",
+   "target_model": null,
+   "params": {
+    "command": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string",
+     "required": false
+    },
+    "timeout": {
+     "type": "number",
+     "required": false
+    },
+    "run_in_background": {
+     "type": "bool",
+     "required": false
+    }
+   },
+   "preconditions": [],
+   "risk": "external",
+   "postcondition": [],
+   "window_ms": null,
+   "description": "셸 명령. 칸은 hooks.md PreToolUse 입력 예의 tool_input 그대로"
+  },
+  {
+   "schema": "action-spec/1",
+   "name": "Read",
+   "version": "1",
+   "target_model": null,
+   "params": {
+    "file_path": {
+     "type": "string"
+    }
+   },
+   "preconditions": [],
+   "risk": "read",
+   "postcondition": [],
+   "window_ms": null,
+   "description": "파일 읽기. file_path 만 문서로 확인했다(그 밖의 칸은 A4 로 막힌다 -- 운영자가 더한다)"
+  },
+  {
+   "schema": "action-spec/1",
+   "name": "Write",
+   "version": "1",
+   "target_model": null,
+   "params": {
+    "file_path": {
+     "type": "string"
+    },
+    "content": {
+     "type": "string"
+    }
+   },
+   "preconditions": [],
+   "risk": "local",
+   "postcondition": [],
+   "window_ms": null,
+   "description": "파일 쓰기. file_path 는 문서 예로 확인, content 는 확인 못 함"
+  }
+ ]
+}

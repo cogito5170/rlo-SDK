@@ -5,8 +5,9 @@
 
 ```
 pip install "git+https://github.com/cogito5170/rlo-SDK@<sha>"            # 입구 + 훅 어댑터
-pip install "rlo-sdk[sensor] @ git+https://github.com/cogito5170/rlo-SDK@<sha>"   # + Sensor
+pip install "rlo-sdk[sensor] @ git+https://github.com/cogito5170/rlo-SDK@<sha>"   # + Sensor (훅에 필요)
 python -m rlo.example                                                   # 예시 세계에서 한 바퀴(shadow · enforce)
+python -m rlo.example_hooks                                             # 기록된 transcript 로 훅 판정(명령 훅 길)
 ```
 
 Python 3.10 이상. 의존은 일곱 저장소의 **커밋 sha 고정**뿐이다(PyPI 에는 올리지 않는다).
@@ -39,7 +40,7 @@ a.close_windows()                                                      # 창이 
 | L0 기록 위치 | `l0=` | 끔 | 경로(JSONL) 또는 `.write(ev)` 하는 sink(Telemetry `MemorySink` 등) |
 | 결정 원장 | `ledger=` | 끔 | JSONL 경로 |
 | `$run.*` 읽기 | `run_state=` | 없음 | `.read(entity, state)` · `.subjects(run)`. Sensor 어댑터는 아직 없다 |
-| Guard 위험 등급 | — | — | **아직 꽂을 수 없다**(MS 가 `risky` 없이 짓는다 → MS 의 일) |
+| Guard 위험 등급 | `risky=` | guard 기본(external · irreversible) | D 가 막는 위험 등급들(MS `Runtime(risky=)`, CMD-M26) |
 
 ## 지키는 것
 
@@ -54,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.1.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.2.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -65,17 +66,19 @@ SDK 판본은 semver 이고, 지금은 `0.x` 다. 계약이 호환되지 않게 
 
 ### 고정 목록
 
-원본은 [`rlo/_pins.py`](rlo/_pins.py) 이고, `pyproject.toml` 이 글자까지 같아야 한다(시험).
+원본은 [`rlo/_pins.py`](rlo/_pins.py) 이고, `pyproject.toml` 이 글자까지 같아야 한다(시험). 깔린 고정 배포가 서로를 요구하는 글자도 이 목록과 같아야 한다(`PinGraph` 시험 — 다르면 pip 가 `ResolutionImpossible`).
+
+`ms[sensor]` 는 쓰지 않는다: MS 의 그 extras 는 Sensor 를 sha 없이 가리켜 `rlo-sdk[sensor]` 와 함께 깔면 설치가 실패한다(잰 것).
 
 | 저장소 | 배포 | sha | |
 |---|---|---|---|
-| Telemetry | `l0-telemetry` | `89d2887` | 필수 |
+| Telemetry | `l0-telemetry` | `35e8119` | 필수 (T18 `tool.start.tool_use_id`) |
 | DC | `dc` | `b55ff04` | 필수 |
-| MS | `ms` | `74a8585` | 필수 |
+| MS | `ms` | `ceda5f7` | 필수 (M26 `risky=` · id 셈 Runtime 마다) |
 | action | `action-contract` | `3995fdb` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `3995fdb` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
 | guard | `guard` | `be871b9` | 필수 |
 | health | `health` | `afcff39` | 필수 |
-| Sensor | `llmsensor` | `a073e77` | `[sensor]` |
+| Sensor | `llmsensor` | `97961e9` | `[sensor]`. S26 — Telemetry 고정을 `35e8119` 로 올린 커밋 |
 
 ## 시험
 
@@ -85,7 +88,34 @@ python -B -m unittest discover -s tests -t .      # 시험
 python -B eval/mutation.py                         # 변이: 모두 RED 여야 한다
 ```
 
+## 훅 — 남의 에이전트에 붙기
+
+`rlo.hooks` 는 Claude Code · Agent SDK 의 도구 호출을 Guard 로 판정한다(`[sensor]` 가 필요하다).
+
+```
+PreToolUse ─► transcript 다시 거둠(Telemetry cc_jsonl) ─► Sensor from_l0 ─► DC execution_control ─► guard ─► {} | deny
+Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─► 관측만(거두지 않음, tool_response 는 L0 로 들이지 않는다)
+```
+
+- **Claude Code 명령 훅**: [`examples/claude_code_settings.json`](examples/claude_code_settings.json). 명령은
+  `python -m rlo.hooks --model <action-model/1 JSON> --mode shadow|enforce --grant <도구> [--record <JSONL>]`.
+  모형의 예는 `rlo/data/cc_tools_model.json`(Bash · Read · Write — 문서로 확인한 칸만).
+- **Agent SDK(Python)**: [`examples/agent_sdk.py`](examples/agent_sdk.py). `guard_hooks(model, mode=…).callback` 을
+  PreToolUse · PostToolUse · PostToolUseFailure · Stop 에 건다. Python SDK 에는 SessionEnd 가 없다(설정 파일 명령 훅으로만).
+- 응답: shadow 는 늘 `{}`. enforce 는 Guard ALLOW 가 아니면 deny. **`"allow"` 는 내지 않는다.** 판정 오류 · 설정 오류는
+  enforce 에서 deny(까닭은 예외 종류만), shadow 에서 `{}`. Stop · SessionEnd 는 막지 않는다.
+- 모형에 없는 도구는 A1, 모르는 인자는 A4, 허가 없는 external · irreversible 은 A7 로 막힌다(enforce).
+
+### 알려진 한계 (잰 것 — `tests/test_hooks.py`)
+
+- **기본 목적 `execution_control` 은 Claude Code transcript 로 채울 수 없다.** 필수 상태 `runtime.rate_limit_state`(요금 한도 사용률이
+  transcript 에 없다)와 `task.progress_state`(정체 문턱이 기본 설정에 없다)가 늘 UNKNOWN 이다 → 문맥이 늘 불완전 →
+  **enforce 에서 위험 등급 도구(external · irreversible)는 정상일 때도 D 로 막힌다.** read · local 등급은 D 밖이다.
+- 필수 상태를 채울 수 있는 목적을 `purpose=` 로 꽂으면 정상은 `{}`, 나란히 부른 도구 · 세션의 첫 도구 호출은 D 다. 그러나
+  **실패 뒤에도 막지 않는다** — 실패는 `execution_health=UNRESOLVED_FAILURES`(쓸 수 있는 값)이고 D 는 값을 보지 않는다.
+- 그래서 지금은 **shadow 로 쓴다.** enforce 의 기본을 어떻게 할지는 baseline 결정을 기다린다.
+- PreToolUse 순간 transcript 에 지금 도구의 `tool_use` 줄이 있는지는 문서로 확인하지 못했다(있는 꼴 · 없는 꼴 둘 다 시험).
+
 ## 아직 하지 않은 것
 
-- 훅 판정 `judge` 를 실제 상태(transcript → Telemetry → Sensor → DC → Guard)로 잇기 — S2-7b.
 - API(서비스) — OQ-19 · OQ-23 이 먼저다.

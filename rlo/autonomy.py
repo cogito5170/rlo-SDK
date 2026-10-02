@@ -51,7 +51,7 @@ class Autonomy:
     """일곱 패키지를 조립하는 입구 하나. MS Runtime 이 이미 조립자다 -- 이 층은 꽂는 자리를 한 곳에 모으고 DC 길을 기본으로 묶는다."""
 
     def __init__(self, world, *, actions, llm, purpose: str = "context_runtime", guard_mode: str = "shadow",
-                 grants=(), l0=None, ledger: "str | None" = None, run_state=None):
+                 grants=(), l0=None, ledger: "str | None" = None, run_state=None, risky=None):
         from dc import DecisionContextBuilder, MSGraphSource, MSStateReader, MSUsageSource
         from ms import usage_model as U
         from ms.query import StateQuery, run_query
@@ -61,7 +61,7 @@ class Autonomy:
         registry = actions if isinstance(actions, ToolRegistry) else ToolRegistry(copy.deepcopy(list(actions)))
         kw = {"l0_sink": l0} if (l0 is not None and not isinstance(l0, str)) else ({"l0_ledger": l0} if l0 else {})
         self.runtime = Runtime(world, registry, {"llm": llm}, grants=grants, ledger_path=ledger, guard_mode=guard_mode,
-                               run_state=run_state, **kw)
+                               run_state=run_state, risky=risky, **kw)
         missing = [name for name, part in (("guard", self.runtime.guard), ("action 실행기", self.runtime.dispatch),
                                            ("health VERIFY", self.runtime.verifier)) if part is None]
         if missing:

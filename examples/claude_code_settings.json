@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m rlo.hooks --model /path/to/cc_tools_model.json --mode shadow --grant Bash --record /path/to/rlo-hooks.jsonl"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m rlo.hooks --model /path/to/cc_tools_model.json --mode shadow --record /path/to/rlo-hooks.jsonl"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m rlo.hooks --model /path/to/cc_tools_model.json --mode shadow --record /path/to/rlo-hooks.jsonl"
+          }
+        ]
+      }
+    ]
+  }
+}

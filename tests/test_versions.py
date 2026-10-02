@@ -42,6 +42,7 @@ class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
         self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
+        self.assertEqual(rlo.__version__, "0.2.0")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다
@@ -87,6 +88,36 @@ class Manifest(unittest.TestCase):
         fake = {"nowhere": ("rlo-no-such-dist", "https://example.invalid/x", "0" * 40)}
         with mock.patch.dict(_pins.EXTRAS, {"probe": fake}):
             self.assertIsNone(rlo.versions()["installed"]["nowhere"])
+
+
+def _norm(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
+
+
+class PinGraph(unittest.TestCase):
+    """고정끼리 맞물린다: 깔린 고정 배포가 다른 고정 배포를 (extras 아닌 의존으로) 요구하면, 그 요구는 이 목록의 글자와 같다.
+    pip 가 `ResolutionImpossible` 을 낼 짝(예: action 2f4791e 대 guard 의 3995fdb)을 설치 없이 잡는다 -- 소스 트리에서도
+    돈다(로컬 경로로 깐 배포도 자기 pyproject 의 요구를 메타데이터에 싣는다)."""
+
+    def test_every_installed_pin_agrees_with_this_list(self):
+        mine = {_norm(p[0]): _pins.requirement(p)
+                for p in [*_pins.REQUIRED.values(), *[x for g in _pins.EXTRAS.values() for x in g.values()]]}
+        checked = 0
+        for dist in mine:
+            try:
+                reqs = metadata.requires(dist) or []
+            except metadata.PackageNotFoundError:
+                continue
+            for r in reqs:
+                if ";" in r:                         # extras 의 요구(예: ms[sensor])는 따로 본다 -- SDK 는 그 extras 를 쓰지 않는다
+                    continue
+                name = _norm(r.split("@", 1)[0])
+                if name in mine:
+                    checked += 1
+                    self.assertEqual(" ".join(r.split()), mine[name], f"{dist} 가 요구하는 {name}")
+        if checked == 0:
+            self.skipTest("고정 배포가 깔려 있지 않다")
+        self.assertGreaterEqual(checked, 4)          # guard · health · ms → action, llmsensor → Telemetry
 
 
 class FrozenContracts(unittest.TestCase):

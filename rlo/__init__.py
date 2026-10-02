@@ -3,7 +3,7 @@
 공개(SDK.md §3):
     Autonomy · Result       입구(rlo.autonomy)
     versions()              고정 목록 · 동결 계약 판본(rlo.versions)
-    rlo.hooks               에이전트 SDK 훅 어댑터(판정 잇기는 S2-7b)
+    rlo.hooks               에이전트 SDK 훅 어댑터 -- guard_hooks(model, mode=…) · python -m rlo.hooks
 그 밖(MS Runtime 속 · DC builder · Sensor 엔진 …)은 내부다. 일곱 저장소는 내부를 자유롭게 바꾼다.
 """
 from .autonomy import Autonomy, Result

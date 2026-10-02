@@ -71,6 +71,14 @@ class GuardAndHealthAreRequired(unittest.TestCase):
         self.assertIsNotNone(rt.dispatch)
         self.assertIsNotNone(rt.verifier)
 
+    def test_risky_reaches_the_guard(self):
+        spec, obs, tools = example.world()
+        from ms.providers import make_provider
+        a = Autonomy.from_spec(spec, obs, clock=lambda: spec["now"], actions=tools, llm=make_provider("sim-claude"),
+                               risky=("local",))
+        self.assertEqual(a.runtime.guard.risky, ("local",))
+        self.assertIsNone(self.build().runtime.guard.risky)                           # 주지 않으면 guard 기본
+
     def test_refuses_to_stand_without_each(self):
         for target in ("ms.guard_shadow.available", "ms.dispatch.available", "ms.verify.available"):
             with self.subTest(target), mock.patch(target, return_value=False):
