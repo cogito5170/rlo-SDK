@@ -16,7 +16,8 @@ import subprocess
 import sys
 from importlib import resources
 
-PRE_SCENARIOS = ("normal", "normal_no_current_use", "after_failure", "read_after_failure", "parallel", "first_call")
+PRE_SCENARIOS = ("normal", "normal_no_current_use", "after_failure", "read_after_failure", "parallel", "first_call",
+                 "first_call_no_current_use", "earlier_pending")
 
 
 def data(name: str):

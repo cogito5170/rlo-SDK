@@ -44,9 +44,17 @@ MUTANTS = [
     ("hooks: 실행 뒤 훅이 거둠", [("rlo/hooks.py", "        self.observe(input_data)                   # 거두지 않는다",
                                   "        self.observe(input_data); self.judge.collect(input_data)  # 거두지 않는다")]),
     ("hooks: 거둔 것을 다시 씀(다시 거두지 않음)", [("rlo/hooks.py",
-        "        return run, from_l0(from_cc_jsonl(path, run), clock=self.clock, **kw)\n",
-        "        if not hasattr(self, '_memo'):\n            self._memo = from_l0(from_cc_jsonl(path, run), clock=self.clock, **kw)\n"
+        "        return run, from_l0(events, clock=self.clock, **kw)\n",
+        "        if not hasattr(self, '_memo'):\n            self._memo = from_l0(events, clock=self.clock, **kw)\n"
         "        return run, self._memo\n")]),
+    ("hooks: 지금 호출을 빼지 않음", [("rlo/hooks.py", "self.collect(input_data, exclude_current=True)",
+                                     "self.collect(input_data, exclude_current=False)")]),
+    ("hooks: 나란히 부른 다른 호출도 뺌", [("rlo/hooks.py",
+        'if e["type"] == "tool.start" and e["data"].get("tool_use_id") == tool_use_id}',
+        'if e["type"] == "tool.start"}')]),
+    ("hooks: 지금 호출의 tool.end 를 남김", [("rlo/hooks.py",
+        'e["type"] in ("tool.start", "tool.end") and e["data"].get("tool_index") in drop',
+        'e["type"] == "tool.start" and e["data"].get("tool_index") in drop')]),
     ("hooks: Stop 이 막음", [("rlo/hooks.py", "            self.record(\"collect_error\", {\"event\": ev, \"exception\": type(e).__name__})\n        return {}\n",
                             "            self.record(\"collect_error\", {\"event\": ev, \"exception\": type(e).__name__})\n"
                             "        return deny(\"stop\")\n")]),
@@ -55,7 +63,7 @@ MUTANTS = [
     ("hooks: 의도가 다른 문맥 id 를 가짐", [("rlo/hooks.py", "intent_material(input_data, dcv.dc_id, self.policy)",
                                           "intent_material(input_data, 'dc-0000000000000000', self.policy)")]),
     ("hooks: 기록에 도구 입력 평문", [("rlo/hooks.py", '"tool_name": it.action,', '"tool_name": it.action, "args": it.args,')]),
-    ("hooks: 기본 목적이 execution_control 이 아님", [("rlo/hooks.py", 'PURPOSE = "execution_control"', 'PURPOSE = "agent_context"')]),
+    ("hooks: 기본 목적이 agent_tool_call 이 아님", [("rlo/hooks.py", 'PURPOSE = "agent_tool_call"', 'PURPOSE = "execution_control"')]),
     ("hooks: 명령 훅 설정 오류에 enforce 도 허락", [("rlo/hooks.py", "        if a.mode == ENFORCE and ev == PRE:\n", "        if False:\n")]),
     ("hooks: Sensor 없이도 훅이 섬", [("rlo/hooks.py", "        except ImportError as e:\n            raise ImportError(", "        except ImportError as e:\n            pass\n        if False:\n            raise ImportError(")]),
     ("hooks: 모르는 모드를 받음", [("rlo/hooks.py", "        if mode not in (SHADOW, ENFORCE):\n", "        if False:\n")]),
@@ -64,7 +72,7 @@ MUTANTS = [
     ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
     ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
     ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
-    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.2.0"', '__version__ = "0.3.0"')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.3.0"', '__version__ = "0.4.0"')]),
     # 예제
     ("examples: 설정 예가 enforce", [("examples/claude_code_settings.json", "--mode shadow --grant Bash", "--mode enforce --grant Bash")]),
     ("examples: Agent SDK 예가 SessionEnd 를 검", [("examples/agent_sdk.py", '"PostToolUseFailure", "Stop")', '"PostToolUseFailure", "Stop", "SessionEnd")')]),

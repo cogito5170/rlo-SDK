@@ -1,6 +1,8 @@
 """판본 목록(BD-120 (3) · (4)) -- versions() 가 pyproject 의 고정 목록 · 깔린 메타데이터 · pip 가 받은 커밋과 같다."""
 import os
 import pathlib
+import shutil
+import tempfile
 import unittest
 from importlib import metadata
 from unittest import mock
@@ -42,7 +44,7 @@ class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
         self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
-        self.assertEqual(rlo.__version__, "0.2.0")
+        self.assertEqual(rlo.__version__, "0.3.0")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다
@@ -90,43 +92,87 @@ class Manifest(unittest.TestCase):
             self.assertIsNone(rlo.versions()["installed"]["nowhere"])
 
 
-def _installed(dist: str) -> bool:
-    try:
-        metadata.distribution(dist)
-        return True
-    except metadata.PackageNotFoundError:
-        return False
+# 배포 이름 -> import 이름. 옆 저장소를 PYTHONPATH 로만 붙였을 때 그 소스의 pyproject 를 찾는 데 쓴다
+MODULES = {"l0-telemetry": "telemetry", "dc": "dc", "ms": "ms", "action-contract": "action", "guard": "guard",
+           "health": "health", "llmsensor": "llmsensor"}
 
 
 def _norm(name: str) -> str:
     return name.strip().lower().replace("_", "-")
 
 
-class PinGraph(unittest.TestCase):
-    """고정끼리 맞물린다: 깔린 고정 배포가 다른 고정 배포를 (extras 아닌 의존으로) 요구하면, 그 요구는 이 목록의 글자와 같다.
-    pip 가 `ResolutionImpossible` 을 낼 짝(예: action 2f4791e 대 guard 의 3995fdb)을 설치 없이 잡는다 -- 소스 트리에서도
-    돈다(로컬 경로로 깐 배포도 자기 pyproject 의 요구를 메타데이터에 싣는다)."""
+def _deps_from_pyproject(path: pathlib.Path, dist: str):
+    """옆 저장소 pyproject 의 [project] dependencies(extras 아님). 그 pyproject 의 이름이 dist 가 아니면 None."""
+    text = path.read_text(encoding="utf-8")
+    try:
+        import tomllib
+        proj = tomllib.loads(text).get("project", {})
+        name, deps = proj.get("name"), proj.get("dependencies", [])
+    except ImportError:                                      # Python 3.10: [project] 의 name · dependencies 만 글로 읽는다
+        import re
+        head = text.split("[project]", 1)[-1].split("\n[", 1)[0]
+        m = re.search(r'^name\s*=\s*"([^"]+)"', head, re.M)
+        name = m.group(1) if m else None
+        d = re.search(r"^dependencies\s*=\s*\[(.*?)\]", head, re.M | re.S)
+        deps = re.findall(r'"([^"]+)"', d.group(1)) if d else []
+    return list(deps) if name and _norm(name) == _norm(dist) else None
 
-    def test_every_installed_pin_agrees_with_this_list(self):
+
+def requirements_of(dist: str) -> "tuple[list, list]":
+    """(요구들, 출처들). 출처: 그 배포의 소스 옆 pyproject(PYTHONPATH · 로컬 경로) 와 깔린 메타데이터 -- 있는 것 모두."""
+    import importlib.util
+    reqs, where = [], []
+    spec = importlib.util.find_spec(MODULES[dist]) if dist in MODULES else None
+    if spec is not None and spec.origin:
+        pp = pathlib.Path(spec.origin).resolve().parent.parent / "pyproject.toml"
+        if pp.exists():
+            got = _deps_from_pyproject(pp, dist)
+            if got is not None:
+                reqs += got
+                where.append("pyproject")
+    try:
+        md = [r for r in (metadata.requires(dist) or []) if ";" not in r]   # extras 의 요구는 SDK 가 쓰지 않는다
+        reqs += md
+        where.append("metadata")
+    except metadata.PackageNotFoundError:
+        pass
+    return reqs, where
+
+
+def _present(dist: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(MODULES[dist]) is not None
+
+
+class PinGraph(unittest.TestCase):
+    """고정끼리 맞물린다: 고정 배포가 다른 고정 배포를 (extras 아닌 의존으로) 요구하면, 그 요구는 이 목록의 글자와 같다.
+    pip 가 `ResolutionImpossible` 을 낼 짝(예: action 2f4791e 대 guard 의 3995fdb)을 설치 없이 잡는다.
+    요구는 **옆 저장소 pyproject 를 직접** 읽고(PYTHONPATH 로만 붙였을 때), 깔린 메타데이터도 읽는다(BD-123 · CMD-K3)."""
+
+    def test_every_pin_agrees_with_this_list(self):
         mine = {_norm(p[0]): _pins.requirement(p)
                 for p in [*_pins.REQUIRED.values(), *[x for g in _pins.EXTRAS.values() for x in g.values()]]}
-        checked = 0
+        checked = set()
         for dist in mine:
-            try:
-                reqs = metadata.requires(dist) or []
-            except metadata.PackageNotFoundError:
-                continue
+            reqs, where = requirements_of(dist)
             for r in reqs:
-                if ";" in r:                         # extras 의 요구(예: ms[sensor])는 따로 본다 -- SDK 는 그 extras 를 쓰지 않는다
-                    continue
                 name = _norm(r.split("@", 1)[0])
                 if name in mine:
-                    checked += 1
-                    self.assertEqual(" ".join(r.split()), mine[name], f"{dist} 가 요구하는 {name}")
-        if checked == 0:
-            self.skipTest("고정 배포가 깔려 있지 않다")
-        want = 3 + (1 if _installed("llmsensor") else 0)          # guard · health · ms → action, (llmsensor → Telemetry)
-        self.assertEqual(checked, want)
+                    checked.add((dist, name))
+                    self.assertEqual(" ".join(r.split()), mine[name], f"{dist} 가 요구하는 {name} ({where})")
+        want = {("guard", "action-contract"), ("health", "action-contract"), ("ms", "action-contract")}
+        if _present("llmsensor"):
+            want.add(("llmsensor", "l0-telemetry"))
+        self.assertEqual(checked, want)                       # 건너뛰지 않는다: 일곱이 어떤 꼴로든 보여야 한다
+
+    def test_reads_a_sibling_pyproject(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)
+        (d / "pyproject.toml").write_text('[project]\nname = "guard"\nversion = "0"\n'
+                                          'dependencies = ["action-contract @ git+https://x/action@abc"]\n'
+                                          '\n[project.optional-dependencies]\nz = ["q"]\n', encoding="utf-8")
+        self.assertEqual(_deps_from_pyproject(d / "pyproject.toml", "guard"), ["action-contract @ git+https://x/action@abc"])
+        self.assertIsNone(_deps_from_pyproject(d / "pyproject.toml", "health"))     # 다른 배포의 pyproject 는 읽지 않는다
 
 
 class FrozenContracts(unittest.TestCase):

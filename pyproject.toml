@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlo-sdk"
-version = "0.2.0"
+version = "0.3.0"
 description = "rlo SDK -- 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 한 입구로 묶는다"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,8 +13,8 @@ requires-python = ">=3.10"
 # action 은 3995fdb 다(stage-3 머리 2f4791e 와 패키지 코드가 같다 -- 까닭은 rlo/_pins.py).
 dependencies = [
     "l0-telemetry @ git+https://github.com/cogito5170/Telemetry@35e8119968758becae94f226ce9ee0168967086e",
-    "dc @ git+https://github.com/cogito5170/DC@b55ff044c992f7ca3fb9ddeb807839be5ae8dd06",
-    "ms @ git+https://github.com/cogito5170/MS@ceda5f7d32054cb88adcdd45bcdf098f10e12609",
+    "dc @ git+https://github.com/cogito5170/DC@526f2fb487934d1d5c1a930f54ea65de493f34cb",
+    "ms @ git+https://github.com/cogito5170/MS@19d850e978f83853edca3ebefdf5c362906ee44c",
     "action-contract @ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
     "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",
     "health @ git+https://github.com/cogito5170/health@afcff3960694f58978afec2cdde62cac9e27830f",

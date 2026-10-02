@@ -11,8 +11,10 @@
                         Python SDK 의 HookEvent 에는 SessionEnd 가 없다 -- 설정 파일의 명령 훅으로만 건다 (agent-sdk/hooks)
 
 판정 길 (`TranscriptJudge`, BD-122):
-    PreToolUse -> transcript 를 **다시 거둔다**(Telemetry `from_cc_jsonl`) -> Sensor `from_l0` -> DC `SensorSource` ·
-    `execution_control`(기본) 문맥 -> guard `dcview_from_dc` -> guard `evaluate` -> 훅 응답
+    PreToolUse -> transcript 를 **다시 거둔다**(Telemetry `from_cc_jsonl`) -> **지금 호출을 뺀다**(BD-124) -> Sensor `from_l0` ->
+    DC `SensorSource` · `agent_tool_call`(기본, BD-123) 문맥 -> guard `dcview_from_dc` -> guard `evaluate` -> 훅 응답
+    지금 호출 = 훅 입력 `tool_use_id` 와 같은 `tool.start` 와 그 `tool.end`(같은 `tool_index`). 그 줄이 훅 순간 transcript 에
+    있을지는 결정적이지 않다(T19) -- 판정하려는 호출은 그 호출의 근거가 아니다. 나란히 부른 **다른** 호출은 남긴다(닫는 쪽).
     Stop · SessionEnd 에서도 거둔다(판정 없음, `collected` 로 넘긴다). PostToolUse 는 관측만 하고 거두지 않는다 --
     그 순간 transcript 에는 그 도구의 결과가 아직 없다(T18: 0/5). 훅 입력의 `tool_response` 는 L0 로 들이지 않는다.
 
@@ -35,7 +37,7 @@ import time
 PRE, POST, POST_FAIL, STOP, SESSION_END = "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"
 SHADOW, ENFORCE = "shadow", "enforce"
 POLICY = "rlo-hooks@1"
-PURPOSE = "execution_control"
+PURPOSE = "agent_tool_call"
 
 
 def intent_material(input_data: dict, dc_id: str, policy: str = POLICY) -> dict:
@@ -43,6 +45,16 @@ def intent_material(input_data: dict, dc_id: str, policy: str = POLICY) -> dict:
     까닭 글은 훅 입력에 없다(지어내지 않는다)."""
     return {"dc_id": dc_id, "policy": policy, "action": input_data["tool_name"], "target": None,
             "args": dict(input_data.get("tool_input") or {}), "rationale": "", "used_keys": (), "author_kind": "llm"}
+
+
+def without_call(events, tool_use_id) -> list:
+    """L0 사건에서 그 호출(`tool.start.tool_use_id` 가 같은 것)의 tool.start · tool.end 를 뺀다(BD-124).
+    tool.end 는 tool_index 로 짝짓는다(Telemetry 수집기). id 가 없으면 아무것도 빼지 않는다."""
+    if not tool_use_id:
+        return list(events)
+    drop = {e["data"].get("tool_index") for e in events
+            if e["type"] == "tool.start" and e["data"].get("tool_use_id") == tool_use_id}
+    return [e for e in events if not (e["type"] in ("tool.start", "tool.end") and e["data"].get("tool_index") in drop)]
 
 
 def run_id_of(input_data: dict) -> str:
@@ -55,7 +67,7 @@ class TranscriptJudge:
     model        에이전트 도구의 `ActionModel`(action-spec/1). 인자 · 위험 등급은 운영자 설정이다
     grants       external · irreversible 을 허락한 도구 이름(A7)
     risky        D 가 막는 위험 등급(없으면 guard 기본)
-    purpose      DC 목적 이름 또는 DC `Purpose`(기본 execution_control)
+    purpose      DC 목적 이름 또는 DC `Purpose`(기본 agent_tool_call, BD-123)
     capabilities DC 능력(예: {"human_reviewer": True})
     sensor_config  Sensor `StateConfig`(문턱. 예: stall_repeat_threshold)
     clock        지금(unix ms)을 주는 함수. 기본은 벽시계 -- transcript 시각과 같은 기준이다
@@ -74,8 +86,8 @@ class TranscriptJudge:
         self.sensor_config = sensor_config
         self.clock = clock or (lambda: time.time() * 1000)
 
-    def collect(self, input_data: dict):
-        """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState)."""
+    def collect(self, input_data: dict, *, exclude_current: bool = False):
+        """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState). exclude_current 면 지금 호출을 뺀다(PreToolUse)."""
         from llmsensor.run_state import from_l0
         from telemetry.collect import from_cc_jsonl
         path = input_data.get("transcript_path")
@@ -83,14 +95,17 @@ class TranscriptJudge:
             raise FileNotFoundError("transcript_path 가 없다")
         run = run_id_of(input_data)
         kw = {} if self.sensor_config is None else {"config": self.sensor_config}
-        return run, from_l0(from_cc_jsonl(path, run), clock=self.clock, **kw)
+        events = from_cc_jsonl(path, run)
+        if exclude_current:
+            events = without_call(events, input_data.get("tool_use_id"))
+        return run, from_l0(events, clock=self.clock, **kw)
 
     def view(self, input_data: dict):
         """(DCView, DC 문맥 dict, RunState)."""
         from dc import DecisionContextBuilder, SensorSource
         from dc.purpose import PURPOSES
         from guard.dc_adapter import dcview_from_dc
-        run, rs = self.collect(input_data)
+        run, rs = self.collect(input_data, exclude_current=True)
         P = self.purpose if not isinstance(self.purpose, str) else PURPOSES[self.purpose]
         src = SensorSource(rs.engine, run_id=run)
         ctx = DecisionContextBuilder([src]).build(P, src.subject(), now_ms=self.clock(), capabilities=self.capabilities)

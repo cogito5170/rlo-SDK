@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.2.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.3.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -68,13 +68,13 @@ SDK 판본은 semver 이고, 지금은 `0.x` 다. 계약이 호환되지 않게 
 
 원본은 [`rlo/_pins.py`](rlo/_pins.py) 이고, `pyproject.toml` 이 글자까지 같아야 한다(시험). 깔린 고정 배포가 서로를 요구하는 글자도 이 목록과 같아야 한다(`PinGraph` 시험 — 다르면 pip 가 `ResolutionImpossible`).
 
-`ms[sensor]` 는 쓰지 않는다: MS 의 그 extras 는 Sensor 를 sha 없이 가리켜 `rlo-sdk[sensor]` 와 함께 깔면 설치가 실패한다(잰 것).
+MS 의 sha 없는 `ms[sensor]` extras 는 `rlo-sdk[sensor]` 와 함께 깔면 설치가 실패했다(잰 것, K2) → MS 가 뺐다(M27).
 
 | 저장소 | 배포 | sha | |
 |---|---|---|---|
 | Telemetry | `l0-telemetry` | `35e8119` | 필수 (T18 `tool.start.tool_use_id`) |
-| DC | `dc` | `b55ff04` | 필수 |
-| MS | `ms` | `ceda5f7` | 필수 (M26 `risky=` · id 셈 Runtime 마다) |
+| DC | `dc` | `526f2fb` | 필수 (D18 목적 `agent_tool_call`) |
+| MS | `ms` | `19d850e` | 필수 (M26 `risky=` · M27 sha 없는 `ms[sensor]` 를 뺐다) |
 | action | `action-contract` | `3995fdb` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `3995fdb` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
 | guard | `guard` | `be871b9` | 필수 |
 | health | `health` | `afcff39` | 필수 |
@@ -93,10 +93,13 @@ python -B eval/mutation.py                         # 변이: 모두 RED 여야 �
 `rlo.hooks` 는 Claude Code · Agent SDK 의 도구 호출을 Guard 로 판정한다(`[sensor]` 가 필요하다).
 
 ```
-PreToolUse ─► transcript 다시 거둠(Telemetry cc_jsonl) ─► Sensor from_l0 ─► DC execution_control ─► guard ─► {} | deny
+PreToolUse ─► transcript 다시 거둠(Telemetry cc_jsonl) ─► 지금 호출을 뺌 ─► Sensor from_l0 ─► DC agent_tool_call ─► guard ─► {} | deny
 Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─► 관측만(거두지 않음, tool_response 는 L0 로 들이지 않는다)
 ```
 
+- **기본 목적은 DC `agent_tool_call`**(BD-123): 필수는 `agent.execution_health` 하나, 나머지는 선택. `purpose=` · `--purpose` 로 바꿀 수 있다.
+- **지금 호출을 빼고 평가한다**(BD-124): 훅 입력 `tool_use_id` 와 같은 `tool.start` 와 그 `tool.end` 를 뺀다. 그 줄이 훅 순간
+  transcript 에 있을지는 결정적이지 않다(T19). 나란히 부른 **다른** 호출은 남긴다(결과를 아직 못 본 앞 호출 → 닫는 쪽).
 - **Claude Code 명령 훅**: [`examples/claude_code_settings.json`](examples/claude_code_settings.json). 명령은
   `python -m rlo.hooks --model <action-model/1 JSON> --mode shadow|enforce --grant <도구> [--record <JSONL>]`.
   모형의 예는 `rlo/data/cc_tools_model.json`(Bash · Read · Write — 문서로 확인한 칸만).
@@ -106,15 +109,16 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   enforce 에서 deny(까닭은 예외 종류만), shadow 에서 `{}`. Stop · SessionEnd 는 막지 않는다.
 - 모형에 없는 도구는 A1, 모르는 인자는 A4, 허가 없는 external · irreversible 은 A7 로 막힌다(enforce).
 
-### 알려진 한계 (잰 것 — `tests/test_hooks.py`)
+### 판정 (잰 것 — `tests/test_hooks.py`, enforce, `--grant Bash`)
 
-- **기본 목적 `execution_control` 은 Claude Code transcript 로 채울 수 없다.** 필수 상태 `runtime.rate_limit_state`(요금 한도 사용률이
-  transcript 에 없다)와 `task.progress_state`(정체 문턱이 기본 설정에 없다)가 늘 UNKNOWN 이다 → 문맥이 늘 불완전 →
-  **enforce 에서 위험 등급 도구(external · irreversible)는 정상일 때도 D 로 막힌다.** read · local 등급은 D 밖이다.
-- 필수 상태를 채울 수 있는 목적을 `purpose=` 로 꽂으면 정상은 `{}`, 나란히 부른 도구 · 세션의 첫 도구 호출은 D 다. 그러나
-  **실패 뒤에도 막지 않는다** — 실패는 `execution_health=UNRESOLVED_FAILURES`(쓸 수 있는 값)이고 D 는 값을 보지 않는다.
-- 그래서 지금은 **shadow 로 쓴다.** enforce 의 기본을 어떻게 할지는 baseline 결정을 기다린다.
-- PreToolUse 순간 transcript 에 지금 도구의 `tool_use` 줄이 있는지는 문서로 확인하지 못했다(있는 꼴 · 없는 꼴 둘 다 시험).
+| 그 순간 | 응답 | 까닭 |
+|---|---|---|
+| 앞 호출 성공 · 실패 · 세션 첫 호출(지금 줄이 있든 없든) | `{}` | `execution_health` 를 안다(실패 값만으로는 막지 않는다, BD-123) |
+| 나란히 부른 · 결과를 못 본 앞 호출이 있음 | deny D | `execution_health` 모름 → 문맥 불완전 |
+| Read(read 등급) | `{}` | D 는 external · irreversible 만 본다 |
+
+실패 뒤에 막고 싶으면 운영자가 행동 명세의 사전조건(A6)으로 둔다(BD-123). `execution_control` 을 꽂으면 Claude Code
+transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
 
 ## 아직 하지 않은 것
 

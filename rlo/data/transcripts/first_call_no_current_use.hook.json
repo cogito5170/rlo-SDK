@@ -1,0 +1,12 @@
+{
+ "session_id": "00000000-0000-4000-8000-000000000001",
+ "transcript_path": "<first_call_no_current_use.jsonl>",
+ "cwd": "/work",
+ "permission_mode": "default",
+ "hook_event_name": "PreToolUse",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "ls"
+ },
+ "tool_use_id": "tu1"
+}

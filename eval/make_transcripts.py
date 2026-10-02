@@ -5,7 +5,7 @@
 **지어낸 것이다(실데이터 아님).** Claude Code transcript JSONL 의 꼴(Telemetry `tests/fixtures.py` 가 쓰는 칸: type ·
 timestamp · message.id/model/usage/content · tool_use · tool_result · toolUseResult)을 따른다. 비밀값 · 실제 경로 · 글이 없다.
 각 파일은 **훅이 불린 순간의 transcript** 다(T18: 차례로 부른 앞 도구의 결과는 그때 있다 · 나란히 부른 도구는 앞 결과가 없다).
-PreToolUse 순간에 **지금 부르는 도구의 tool_use 줄이 이미 있다고 가정했다**(문서로 확인 못 함 -- 없는 꼴도 시험한다).
+PreToolUse 순간 지금 부르는 도구의 tool_use 줄은 있을 수도 없을 수도 있다(T19: 결정적이지 않다, BD-124) -- 두 꼴을 다 둔다.
 """
 from __future__ import annotations
 
@@ -81,6 +81,11 @@ SCENARIOS = {
                  hook("PreToolUse", "parallel", "Bash", RM, "tu2")),
     "first_call": (T().user("go").uses("m1", ("tu1", "Bash", LS)),
                    hook("PreToolUse", "first_call", "Bash", LS, "tu1")),
+    "first_call_no_current_use": (T().user("go"),
+                                  hook("PreToolUse", "first_call_no_current_use", "Bash", LS, "tu1")),
+    # 앞 호출(tu1)의 결과가 아직 없다 -- 지금 호출(tu2)을 빼도 execution_health 는 모름이다
+    "earlier_pending": (T().user("go").uses("m1", ("tu1", "Bash", MAKE)).uses("m2", ("tu2", "Bash", RM)),
+                        hook("PreToolUse", "earlier_pending", "Bash", RM, "tu2")),
     "ended": (T().user("go").uses("m1", ("tu1", "Bash", LS)).result("tu1", True, "a b").text("m2", "done")
               .stop_summary(),
               hook("Stop", "ended")),

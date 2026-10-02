@@ -7,7 +7,7 @@
 - Python SDK 의 `HookEvent` 에는 SessionEnd 가 없다 -- SessionEnd 에서도 거두려면 `.claude/settings.json` 의 명령 훅
   (examples/claude_code_settings.json)을 쓰고 `setting_sources=["project"]` 로 읽힌다.
 - PreToolUse 콜백이 시간 초과면 그 도구는 실행되지 않는다(기본 600 초).
-- 기본 모드는 shadow(기록만). enforce 로 바꾸기 전에 README 의 "알려진 한계" 를 읽는다.
+- 기본 모드는 shadow(기록만). enforce 로 바꾸기 전에 README 의 판정 표를 읽는다.
 """
 from __future__ import annotations
 
