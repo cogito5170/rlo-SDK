@@ -1,0 +1,377 @@
+{
+ "claude_version": "2.1.288 (Claude Code)",
+ "rlo_version": "0.8.0",
+ "channel": {
+  "tool": "Bash",
+  "argv_prefix": [
+   "ga",
+   "mail"
+  ],
+  "use": "report"
+ },
+ "idle_s": 660.0,
+ "runs": [
+  {
+   "run": "run1",
+   "rc": 0,
+   "wall_s": 4.5,
+   "claude": {
+    "is_error": false,
+    "num_turns": 2,
+    "total_cost_usd": 0.0192781,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8
+  },
+  {
+   "run": "run2",
+   "rc": 0,
+   "wall_s": 7.7,
+   "claude": {
+    "is_error": false,
+    "num_turns": 4,
+    "total_cost_usd": 0.0321157,
+    "subtype": "success",
+    "parse_error": null,
+    "stderr_head": null
+   },
+   "result_chars": 8
+  }
+ ],
+ "idle_gap_s": 663,
+ "hooks": [
+  {
+   "run": "run1",
+   "n": 0,
+   "event": "PreToolUse",
+   "tool_name": "Bash",
+   "channel": false,
+   "tool_input_keys": [
+    "command",
+    "description"
+   ],
+   "ms": 179.8,
+   "rc": 0,
+   "decision": null,
+   "replay_b": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "replay_ttl": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "health": {
+    "b": {
+     "execution_health": [
+      "NO_TOOL_RUN_YET",
+      "INFERRED"
+     ],
+     "complete": true,
+     "missing_required": [],
+     "stale": []
+    },
+    "ttl": {
+     "execution_health": [
+      "NO_TOOL_RUN_YET",
+      "INFERRED"
+     ],
+     "complete": true,
+     "missing_required": [],
+     "stale": []
+    }
+   }
+  },
+  {
+   "run": "run1",
+   "n": 1,
+   "event": "Stop",
+   "tool_name": null,
+   "channel": null,
+   "tool_input_keys": [],
+   "ms": 144.8,
+   "rc": 0,
+   "decision": null,
+   "replay_b": null,
+   "replay_ttl": null,
+   "health": null
+  },
+  {
+   "run": "run1",
+   "n": 2,
+   "event": "SessionEnd",
+   "tool_name": null,
+   "channel": null,
+   "tool_input_keys": [],
+   "ms": 159.5,
+   "rc": 0,
+   "decision": null,
+   "replay_b": null,
+   "replay_ttl": null,
+   "health": null
+  },
+  {
+   "run": "run2",
+   "n": 3,
+   "event": "PreToolUse",
+   "tool_name": "Read",
+   "channel": false,
+   "tool_input_keys": [
+    "file_path"
+   ],
+   "ms": 226.0,
+   "rc": 0,
+   "decision": null,
+   "replay_b": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "replay_ttl": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "health": {
+    "b": {
+     "execution_health": [
+      "UNRESOLVED_FAILURES",
+      "INFERRED"
+     ],
+     "complete": true,
+     "missing_required": [],
+     "stale": [
+      "task.completion_state"
+     ]
+    },
+    "ttl": {
+     "execution_health": [
+      null,
+      "STALE"
+     ],
+     "complete": false,
+     "missing_required": [
+      "agent.execution_health"
+     ],
+     "stale": [
+      "agent.execution_health",
+      "task.completion_state",
+      "tool[Bash].tool_execution_health"
+     ]
+    }
+   }
+  },
+  {
+   "run": "run2",
+   "n": 4,
+   "event": "PreToolUse",
+   "tool_name": "Bash",
+   "channel": false,
+   "tool_input_keys": [
+    "command",
+    "description"
+   ],
+   "ms": 180.5,
+   "rc": 0,
+   "decision": null,
+   "replay_b": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "replay_ttl": {
+    "rc": 0,
+    "decision": "deny",
+    "rule": "D",
+    "verdict": "DENY",
+    "allowed_while_stale": null,
+    "react": {
+     "kind": "refresh_read",
+     "rule": "D",
+     "cause": "stale",
+     "tool": null,
+     "escalate": false
+    }
+   },
+   "health": {
+    "b": {
+     "execution_health": [
+      "UNRESOLVED_FAILURES",
+      "INFERRED"
+     ],
+     "complete": true,
+     "missing_required": [],
+     "stale": []
+    },
+    "ttl": {
+     "execution_health": [
+      null,
+      "STALE"
+     ],
+     "complete": false,
+     "missing_required": [
+      "agent.execution_health"
+     ],
+     "stale": [
+      "agent.execution_health",
+      "tool[Bash].tool_execution_health"
+     ]
+    }
+   }
+  },
+  {
+   "run": "run2",
+   "n": 5,
+   "event": "PreToolUse",
+   "tool_name": "Bash",
+   "channel": true,
+   "tool_input_keys": [
+    "command",
+    "description"
+   ],
+   "ms": 268.4,
+   "rc": 0,
+   "decision": null,
+   "replay_b": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "0",
+    "verdict": "ALLOW",
+    "allowed_while_stale": null,
+    "react": null
+   },
+   "replay_ttl": {
+    "rc": 0,
+    "decision": "allow",
+    "rule": "D",
+    "verdict": "DENY",
+    "allowed_while_stale": "channel:Bash",
+    "react": null
+   },
+   "health": {
+    "b": {
+     "execution_health": [
+      "UNRESOLVED_FAILURES",
+      "INFERRED"
+     ],
+     "complete": true,
+     "missing_required": [],
+     "stale": []
+    },
+    "ttl": {
+     "execution_health": [
+      null,
+      "STALE"
+     ],
+     "complete": false,
+     "missing_required": [
+      "agent.execution_health"
+     ],
+     "stale": [
+      "agent.execution_health",
+      "tool[Bash].tool_execution_health"
+     ]
+    }
+   }
+  },
+  {
+   "run": "run2",
+   "n": 6,
+   "event": "Stop",
+   "tool_name": null,
+   "channel": null,
+   "tool_input_keys": [],
+   "ms": 169.7,
+   "rc": 0,
+   "decision": null,
+   "replay_b": null,
+   "replay_ttl": null,
+   "health": null
+  },
+  {
+   "run": "run2",
+   "n": 7,
+   "event": "SessionEnd",
+   "tool_name": null,
+   "channel": null,
+   "tool_input_keys": [],
+   "ms": 168.0,
+   "rc": 0,
+   "decision": null,
+   "replay_b": null,
+   "replay_ttl": null,
+   "health": null
+  }
+ ],
+ "record": [
+  {
+   "kind": "guard",
+   "tool_name": "Bash",
+   "verdict": "ALLOW",
+   "rule": "0",
+   "complete": true,
+   "allowed_while_stale": null
+  },
+  {
+   "kind": "guard",
+   "tool_name": "Read",
+   "verdict": "ALLOW",
+   "rule": "0",
+   "complete": true,
+   "allowed_while_stale": null
+  },
+  {
+   "kind": "guard",
+   "tool_name": "Bash",
+   "verdict": "ALLOW",
+   "rule": "0",
+   "complete": true,
+   "allowed_while_stale": null
+  },
+  {
+   "kind": "guard",
+   "tool_name": "Bash",
+   "verdict": "ALLOW",
+   "rule": "0",
+   "complete": true,
+   "allowed_while_stale": null
+  }
+ ],
+ "transcript": {
+  "tool_uses": 4,
+  "names": {
+   "Bash": 3,
+   "Read": 1
+  },
+  "no_result": [],
+  "errors": 1
+ },
+ "checks": {
+  "run1_bash_failed": true,
+  "idle_past_stale_window": true,
+  "run2_read_first": true,
+  "run2_all_pass": true,
+  "run2_bash_and_channel_seen": true,
+  "no_stale_deny_of_a_channel": true,
+  "replay_b_matches_live": true
+ }
+}

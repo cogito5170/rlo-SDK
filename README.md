@@ -169,6 +169,10 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
 - **판정 비용**: Sensor 는 사건마다 모든 지표를 다시 계산한다 — 10 MB 실제 transcript(L0 사건 1,726)에서 한 번에 약 62 초. 사건을
   나눠 받는 길이 Sensor 에 없어서(“더 받으려면 모든 사건으로 다시 만든다”) rlo 가 이어 받을 수 없다. Sensor 에 요청했다(baseline#3).
   그때까지 긴 세션에서는 기한이 지키는 쪽(닫힘 · 통로는 열림)이다.
+- **실제 확인**(S4, `eval/k13_live.py` → `eval/results/k13_live_2026-10-03.json`): 실제 `claude -p` 두 번, 한 세션, enforce.
+  첫 실행에서 Bash 하나가 실패(풀리지 않은 실패), 663 초 쉼(낡음 창 600 초), 이어 받은 둘째 실행의 Read · Bash · 고정 통로
+  (`ga mail …`)가 모두 지나갔다. 같은 순간의 사본을 `--health-ttl` 로 다시 돌리면 Bash 는 DENY(D) 낡음 · `refresh_read`, 통로는
+  `allowed_while_stale: channel:Bash` — 선택 B 가 바꾼 것이 이것이다. 결과에는 이름 · 수 · 라벨만 남는다.
 
 ### 거부마다 대안 하나 — 턴 안 ReAct (CMD-K11, `rlo/react.py`)
 
