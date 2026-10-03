@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlo-sdk"
-version = "0.6.0"
+version = "0.7.0"
 description = "rlo SDK -- 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 한 입구로 묶는다"
 readme = "README.md"
 requires-python = ">=3.10"

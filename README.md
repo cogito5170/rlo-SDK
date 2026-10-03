@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.6.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.7.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -183,6 +183,41 @@ guard DENY(A1): [A1] 행동 ReadNotifications 는 이 문맥에서 제안되지 
 
 실패 뒤에 막고 싶으면 운영자가 행동 명세의 사전조건(A6)으로 둔다(BD-123). `execution_control` 을 꽂으면 Claude Code
 transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
+
+## 분당 한도 — 지킴이와 걸음 차례 (CMD-K12)
+
+LLM 없는 제어기가 걸음마다 모형이 필요한지 정하고, 분당 한도(RPM · TPM)가 찼으면 도구 걸음을 계속 돌리며 모형 걸음을 세워 두었다가
+창이 열리면 차례대로 다시 보낸다. 공급자를 가리지 않는다(Gemini 의 429 꼴을 안다). 429 는 실패가 아니라 미룸이다.
+
+```python
+from rlo import Governor, Scheduler, Step
+
+gov = Governor({"gemini-3.1-flash-lite": {"rpm": 15, "tpm": 250_000}})          # 모형마다 예산(설정), 미끄러지는 60 초 창
+kinds = {"schema": "rlo-step-kinds/1", "steps": {"read": "tool", "plan": "model", "render": "tool"}}
+steps = [Step("s1", "read", fn=read_files),
+         Step("s2", "plan", payload=lambda r: make_prompt(r["s1"]), after=("s1",), est_tokens=2_000),
+         Step("s3", "render", fn=lambda r: render(r["s2"]), after=("s2",))]
+report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").run()
+# report.done · report.failed(429 로는 생기지 않는다) · report.parked(하루 할당 소진 등) · report.ledger
+```
+
+- **지킴이(`rlo.governor.Governor`)**: `try_acquire(est_tokens)` 가 ok 면 창에 적고, 아니면 `wait_s` 를 준다. 부른 뒤
+  `observe(ticket, usage)` 로 추정을 실제 사용량으로 바꾼다. 429 면 `on_rate_limit(e)`: 공급자가 **선언한** 대기
+  (Gemini `RetryInfo.retryDelay` · `retry-after`, Telemetry `errors.translate` 로 읽음)가 이기고, 없으면 할당 힌트
+  (`quotaId` 의 PerMinute → 60 초, PerDay → 오늘은 더 부르지 않음), 그것도 없으면 60 초. 시계는 바꿔 끼울 수 있다.
+- **걸음 표(`rlo-step-kinds/1`)**: 걸음 이름마다 `model`(LLM 공급자를 부른다) 또는 `tool`. **닫힌 표**라 표에 없는 이름은
+  싣는 순간 `StepKindError` 다. 표는 rlo 의 것이다(action-model/1 밖, `substitutes` 와 같은 자리).
+- **걸음 차례(`rlo.scheduler.Scheduler`)**: 도구 걸음은 준비되면(`after` 끝남 · `not_before` 지남) 언제나 돈다 — 세워 둔 모형
+  걸음 뒤에 막히지 않는다. 모형 걸음은 큐 차례대로 하나씩, 지킴이가 허락할 때만 보낸다. 할 수 있는 것이 없을 때만 다음 도구
+  걸음 · 창이 열리는 때 가운데 이른 쪽까지 **한 번** 잔다(바쁘게 돌지 않는다). 하루 할당처럼 기다려도 풀리지 않으면 세운 채 끝낸다.
+- **기록**: 세움 · 보냄 · 429 · 끝남마다 원장 줄(걸음 id) 하나와 L0 사건(닫힌 목록 안: `runtime.status` · `llm.request`
+  (`attempt` = 다시 보낸 횟수) · `llm.response` · `llm.error`(`retry_after_ms`, `error_code` RATE_LIMITED) · `tool.start/end`).
+  L0 사건 목록에 걸음 칸이 없어서 모형 걸음은 `call_index` 로 잇는다.
+- **VERIFY(health)**: 세운 걸음마다 "창(대기 + 여유 5 초) 안에 보냈다" 를 health `verify` 로 판정한다(원장 `verification`).
+- **`Autonomy(..., governor=)`**: LLM 을 감싼다. 한 `handle` 의 첫 부름 앞에서 예산이 없거나 429 면 실패하지 않고
+  **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
+  다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)
+  창이 열릴 때까지 한 번 잔다(`governor_sleep`, 90 초 넘는 대기 · 429 세 번 넘으면 미룸).
 
 ## 기록을 읽는 도구 둘
 

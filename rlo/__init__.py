@@ -4,9 +4,13 @@
     Autonomy · Result       입구(rlo.autonomy)
     versions()              고정 목록 · 동결 계약 판본(rlo.versions)
     rlo.hooks               에이전트 SDK 훅 어댑터 -- guard_hooks(model, mode=…) · python -m rlo.hooks
+    Governor                분당 한도 지킴이(rlo.governor, CMD-K12) -- Autonomy(governor=) 또는 Scheduler 가 쓴다
+    Scheduler · Step · load_step_kinds   걸음 차례(rlo.scheduler, CMD-K12) -- Autonomy 없이 제어기가 바로 부르는 얇은 입구
 그 밖(MS Runtime 속 · DC builder · Sensor 엔진 …)은 내부다. 일곱 저장소는 내부를 자유롭게 바꾼다.
 """
 from .autonomy import Autonomy, Result
+from .governor import Governor
+from .scheduler import Scheduler, Step, load_step_kinds
 from .versions import __version__, versions
 
-__all__ = ["Autonomy", "Result", "versions", "__version__"]
+__all__ = ["Autonomy", "Result", "Governor", "Scheduler", "Step", "load_step_kinds", "versions", "__version__"]
