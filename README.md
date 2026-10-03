@@ -118,6 +118,18 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   PreToolUse · PostToolUse · PostToolUseFailure · Stop 에 건다. Python SDK 에는 SessionEnd 가 없다(설정 파일 명령 훅으로만).
 - 응답: shadow 는 늘 `{}`. enforce 는 Guard ALLOW 가 아니면 deny. **`"allow"` 는 내지 않는다.** 판정 오류 · 설정 오류는
   enforce 에서 deny(까닭은 예외 종류만), shadow 에서 `{}`. Stop · SessionEnd 는 막지 않는다.
+- **꼴이 틀린 입력도 막는다**(CMD-K10). 빈 표준입력 · JSON 아님 · 꼴 위반(객체 아님, `hook_event_name` 없음, PreToolUse 의
+  `tool_name` · `tool_input` · `transcript_path` 없음이나 틀린 타입)은 enforce 에서 PreToolUse deny
+  `rlo hook input error: <문제>`, shadow 에서 출력 없음. **둘 다 종료 0** 이고 `--record` 에 `input_error` 한 줄
+  (문제만, 값은 없음)을 남긴다. 0 아닌 종료를 "막지 않음" 으로 보는 호스트가 있어서, 명령 훅은 그 밖의 예상 못 한 예외
+  (예: 기록 파일을 쓰지 못함)도 종료 0 · enforce deny(`rlo hook error: <종류>`)로 닫는다. 전에는 빈 · JSON 아닌 입력이
+  종료 1, `hook_event_name` 없는 입력이 출력 없음(허락)이었다.
+- **낡음만으로 막혔으면 되살리는 법을 말한다**(CMD-K10). 쉼(Sensor 기본 TTL 10 분) 뒤에는 `agent.execution_health` 가 STALE
+  이라 첫 위험 도구가 D 로 막힌다. D 의 쓸 수 없는 필수 키가 **모두 STALE**(UNKNOWN · 없음이 없음)이고 걸린 규칙이 D 뿐이면,
+  까닭 끝에 정해진 안내가 붙는다: `-- hint: the decision state is stale, not unavailable; make one read-only tool call to
+  refresh it, then retry`. 읽기 도구(Read · Grep, 위험 등급 read)는 D 밖이라 지나고, 그 결과가 상태를 새로 관측한다 —
+  그 뒤 같은 호출은 지난다(시험 `StaleHint`). 판정은 deny 그대로이고, 상태를 지어내거나 시계를 바꾸지 않는다.
+  나란히 부른 호출처럼 상태를 **모르는**(UNKNOWN) D 에는 붙지 않는다.
 - 모형에 없는 도구는 A1, 모르는 인자는 A4, 허가 없는 external · irreversible 은 A7 로 막힌다(enforce).
 - **모형 밖 도구는 enforce 에서 막힌다.** 실제 Claude Code 6 실행(K7)에서 도구 호출 16 가운데 4 가 그랬다(Grep · Edit, 그때는
   예시 모형 밖). Glob · TodoWrite · Task · WebFetch 등은 지금도 예시 모형 밖이다. 그러니 **모형을 넓히기 전에는 shadow 로 쓴다.**

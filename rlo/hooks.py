@@ -23,6 +23,12 @@
   건너뛴다 -- Guard 는 닫는 쪽으로만 쓴다(BD-07).
 - shadow 는 판정을 기록만 하고 늘 `{}`. enforce 는 ALLOW 가 아니면 deny. 판정 중 예외(transcript 없음 · 꼴 오류 …)는
   enforce 에서 deny(닫는 쪽), shadow 에서 `{}`. 까닭에는 예외 **종류만** 싣는다.
+- **꼴이 틀린 입력도 닫는다**(CMD-K10 S1). 빈 입력 · JSON 아님 · 꼴 위반(객체 아님, `hook_event_name` 없음, PreToolUse 의
+  `tool_name` · `tool_input` · `transcript_path` 없음 · 틀린 타입)은 enforce 에서 PreToolUse deny(`rlo hook input error: <문제>`),
+  shadow 에서 `{}`. 둘 다 종료 0, 기록 한 줄(`input_error`). 명령 훅은 그 밖의 예상 못 한 예외도 종료 0 으로 닫는다 --
+  0 아닌 종료를 막지 않음으로 보는 호스트가 있다.
+- **낡음만으로 생긴 D 에는 되살리는 법을 붙인다**(CMD-K10 S2). D 의 쓸 수 없는 필수 키가 모두 STALE(UNKNOWN · 없음이
+  하나도 없음)이고 걸린 규칙이 D 뿐이면, 까닭 끝에 정해진 안내 `STALE_HINT` 를 붙인다. 판정은 그대로 deny 다.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
@@ -38,6 +44,9 @@ PRE, POST, POST_FAIL, STOP, SESSION_END = "PreToolUse", "PostToolUse", "PostTool
 SHADOW, ENFORCE = "shadow", "enforce"
 POLICY = "rlo-hooks@1"
 PURPOSE = "agent_tool_call"
+# 낡음만으로 생긴 D 의 안내(정해진 글 하나). 읽기만 하는 호출(위험 등급 밖, D 가 보지 않는다)의 결과가 상태를 새로 관측한다
+STALE_HINT = (" -- hint: the decision state is stale, not unavailable; make one read-only tool call to refresh it, "
+              "then retry")
 
 
 def intent_material(input_data: dict, dc_id: str, policy: str = POLICY) -> dict:
@@ -55,6 +64,29 @@ def without_call(events, tool_use_id) -> list:
     drop = {e["data"].get("tool_index") for e in events
             if e["type"] == "tool.start" and e["data"].get("tool_use_id") == tool_use_id}
     return [e for e in events if not (e["type"] in ("tool.start", "tool.end") and e["data"].get("tool_index") in drop)]
+
+
+def input_problem(input_data) -> "str | None":
+    """훅 입력의 꼴 문제(없으면 None). 칸 이름 · 타입만 말하고 값은 싣지 않는다(CMD-K10 S1)."""
+    if not isinstance(input_data, dict):
+        return f"input is not a JSON object ({type(input_data).__name__})"
+    ev = input_data.get("hook_event_name")
+    if not isinstance(ev, str) or not ev:
+        return "missing field hook_event_name" if ev is None else "field hook_event_name is not a non-empty string"
+    if ev == PRE:
+        for name, kind in (("tool_name", str), ("tool_input", dict), ("transcript_path", str)):
+            v = input_data.get(name)
+            if v is None:
+                return f"missing field {name}"
+            if not isinstance(v, kind) or (kind is str and not v):
+                return f"field {name} is not a {'non-empty string' if kind is str else 'JSON object'}"
+    return None
+
+
+def stale_only(res, dcv) -> bool:
+    """걸린 규칙이 D 뿐이고, D 의 쓸 수 없는 필수 키가 모두 STALE 인가(UNKNOWN · 없음은 하나도 없다)."""
+    return (res.rule == "D" and all(r.startswith("[D]") for r in res.reasons)
+            and set(dcv.missing_required) <= set(dcv.stale_keys))
 
 
 def run_id_of(input_data: dict) -> str:
@@ -143,7 +175,8 @@ class HookAdapter:
                                   "dc_id": dcv.dc_id, "complete": dcv.complete,
                                   "missing_required": list(dcv.missing_required), "result": res.to_dict()})
             if self.mode == ENFORCE and res.verdict != "ALLOW":
-                return deny(f"guard {res.verdict}({res.rule}): " + "; ".join(res.reasons)[:500])
+                hint = STALE_HINT if stale_only(res, dcv) else ""                 # 자르기 뒤에 붙인다 -- 잘리지 않게
+                return deny(f"guard {res.verdict}({res.rule}): " + "; ".join(res.reasons)[:500] + hint)
             return {}
         except Exception as e:                     # 닫는 쪽: enforce 면 막는다. 메시지는 종류만
             self.record("guard_error", {"tool_use_id": input_data.get("tool_use_id"), "exception": type(e).__name__})
@@ -163,7 +196,16 @@ class HookAdapter:
             self.record("collect_error", {"event": ev, "exception": type(e).__name__})
         return {}
 
+    def bad_input(self, problem: str, input_data=None) -> dict:
+        """꼴이 틀린 입력(CMD-K10 S1): 기록 한 줄, enforce 면 PreToolUse deny(무슨 사건인지 믿을 수 없으니 닫는다)."""
+        ev = input_data.get("hook_event_name") if isinstance(input_data, dict) else None
+        self.record("input_error", {"event": ev if isinstance(ev, str) else None, "problem": problem})
+        return deny(f"rlo hook input error: {problem}") if self.mode == ENFORCE else {}
+
     def handle(self, input_data: dict) -> dict:
+        problem = input_problem(input_data)
+        if problem:
+            return self.bad_input(problem, input_data)
         ev = input_data.get("hook_event_name")
         if ev == PRE:
             return self.pre_tool_use(input_data)
@@ -189,9 +231,24 @@ def deny(reason: str) -> dict:
                                    "permissionDecisionReason": reason}}
 
 
+def read_input(stdin) -> "tuple[object, str | None]":
+    """표준입력 → (JSON 값, 문제). 빈 입력 · UTF-8 아님 · JSON 아님은 문제로 낸다(값은 None)."""
+    try:
+        raw = stdin.read()
+    except UnicodeDecodeError:
+        return None, "input is not UTF-8 text"
+    if not raw.strip():
+        return None, "empty input"
+    try:
+        return json.loads(raw), None
+    except ValueError:
+        return None, "input is not JSON"
+
+
 def run_command_hook(adapter: HookAdapter, stdin, stdout) -> int:
     """Claude Code 명령 훅: 표준입력의 JSON 하나 → 표준출력의 JSON 하나, 종료 코드 0(막기는 JSON 의 deny 로)."""
-    out = adapter.handle(json.load(stdin))
+    data, problem = read_input(stdin)
+    out = adapter.bad_input(problem) if problem else adapter.handle(data)
     if out:
         json.dump(out, stdout)
     return 0
@@ -212,7 +269,17 @@ def _parser():
     return ap
 
 
-def _adapter_from_args(a) -> HookAdapter:
+def _recorder(path):
+    if not path:
+        return None
+
+    def record(kind, d):
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(json.dumps({"kind": kind, **d}, ensure_ascii=False) + "\n")
+    return record
+
+
+def _adapter_from_args(a, record=None) -> HookAdapter:
     from action.spec import ActionModel
     with open(a.model, encoding="utf-8") as f:
         model = ActionModel.from_dict(json.load(f))
@@ -220,11 +287,6 @@ def _adapter_from_args(a) -> HookAdapter:
     if a.stall_threshold is not None:
         from llmsensor.state import DEFAULT_CONFIG
         cfg = DEFAULT_CONFIG.with_(stall_repeat_threshold=a.stall_threshold)
-    record = None
-    if a.record:
-        def record(kind, d, path=a.record):
-            with open(path, "a", encoding="utf-8") as out:
-                out.write(json.dumps({"kind": kind, **d}, ensure_ascii=False) + "\n")
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
                        clock=clock)
@@ -237,19 +299,27 @@ def main(argv=None, stdin=None, stdout=None) -> int:
         return install_main(argv[0], argv[1:])
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     a = _parser().parse_args(argv)
-    raw = stdin.read()
+    data, problem = read_input(stdin)
+    if problem is None:
+        problem = input_problem(data)
     try:
-        adapter = _adapter_from_args(a)
-    except Exception as e:                         # 설정이 틀려도 enforce 의 PreToolUse 는 닫는다
-        try:
-            ev = json.loads(raw).get("hook_event_name")
-        except Exception:
-            ev = None
-        if a.mode == ENFORCE and ev == PRE:
-            json.dump(deny(f"rlo hook config error: {type(e).__name__}"), stdout)
-        return 0
-    import io
-    return run_command_hook(adapter, io.StringIO(raw), stdout)
+        record = _recorder(a.record)
+        if problem:                                # 꼴이 틀린 입력은 모형을 읽기 전에 닫는다(CMD-K10 S1)
+            out = HookAdapter(None, mode=a.mode, record=record).bad_input(problem, data)
+        else:
+            try:
+                adapter = _adapter_from_args(a, record)
+            except Exception as e:                 # 설정이 틀려도 enforce 의 PreToolUse 는 닫는다
+                if a.mode == ENFORCE and data.get("hook_event_name") == PRE:
+                    json.dump(deny(f"rlo hook config error: {type(e).__name__}"), stdout)
+                return 0
+            out = adapter.handle(data)
+    except Exception as e:                         # 예상 못 한 예외(기록 쓰기 실패 …)도 종료 0 으로 닫는다
+        ev = data.get("hook_event_name") if isinstance(data, dict) else None
+        out = deny(f"rlo hook error: {type(e).__name__}") if a.mode == ENFORCE and ev in (PRE, None) else {}
+    if out:
+        json.dump(out, stdout)
+    return 0
 
 
 if __name__ == "__main__":

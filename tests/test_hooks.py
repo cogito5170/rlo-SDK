@@ -311,5 +311,157 @@ class WithoutSensor(unittest.TestCase):
                          "rlo hook config error: ImportError")
 
 
+
+PRE_OK = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},
+          "transcript_path": "/work/t.jsonl", "tool_use_id": "tu9"}
+BAD_INPUTS = [                                      # (표준입력, 까닭에 들어갈 문제)
+    ("", "empty input"),
+    ("  \n", "empty input"),
+    ("not json {", "input is not JSON"),
+    ("[1, 2]", "input is not a JSON object (list)"),
+    (json.dumps({"tool_name": "Bash"}), "missing field hook_event_name"),
+    (json.dumps({k: v for k, v in PRE_OK.items() if k != "tool_name"}), "missing field tool_name"),
+    (json.dumps({k: v for k, v in PRE_OK.items() if k != "tool_input"}), "missing field tool_input"),
+    (json.dumps({k: v for k, v in PRE_OK.items() if k != "transcript_path"}), "missing field transcript_path"),
+    (json.dumps(dict(PRE_OK, tool_input="secret-xyz")), "field tool_input is not a JSON object"),
+    (json.dumps(dict(PRE_OK, tool_name="")), "field tool_name is not a non-empty string"),
+]
+
+
+class MalformedInput(unittest.TestCase):
+    """CMD-K10 S1: 꼴이 틀린 훅 입력 -- enforce 는 deny(종료 0), shadow 는 출력 없음(종료 0), 둘 다 기록 한 줄.
+    모형을 읽기 전에 닫으므로 Sensor 가 없어도 같다."""
+
+    def cli(self, raw, mode, *args, model=None):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)
+        rec = d / "r.jsonl"
+        argv = [sys.executable, "-m", "rlo.hooks", "--model", model or str(data("cc_tools_model.json")), "--mode", mode,
+                "--grant", "Bash", "--record", str(rec), *args]
+        p = subprocess.run(argv, input=raw, capture_output=True, text=True)
+        rows = [json.loads(x) for x in rec.read_text(encoding="utf-8").splitlines()] if rec.exists() else []
+        return p, rows
+
+    def test_enforce_denies_with_the_problem_named(self):
+        for raw, problem in BAD_INPUTS:
+            with self.subTest(problem=problem, raw=raw[:30]):
+                p, rows = self.cli(raw, "enforce")
+                self.assertEqual(p.returncode, 0, p.stderr)
+                out = json.loads(p.stdout)["hookSpecificOutput"]
+                self.assertEqual((out["hookEventName"], out["permissionDecision"]), ("PreToolUse", "deny"))
+                self.assertEqual(out["permissionDecisionReason"], f"rlo hook input error: {problem}")
+                self.assertEqual([(r["kind"], r["problem"]) for r in rows], [("input_error", problem)])
+                self.assertNotIn("secret-xyz", p.stdout + json.dumps(rows))      # 값은 싣지 않는다
+
+    def test_shadow_is_silent_and_records(self):
+        for raw, problem in BAD_INPUTS:
+            with self.subTest(problem=problem):
+                p, rows = self.cli(raw, "shadow")
+                self.assertEqual((p.returncode, p.stdout), (0, ""), p.stderr)
+                self.assertEqual([(r["kind"], r["problem"]) for r in rows], [("input_error", problem)])
+
+    def test_not_utf8(self):
+        argv = [sys.executable, "-m", "rlo.hooks", "--model", str(data("cc_tools_model.json")), "--mode", "enforce"]
+        p = subprocess.run(argv, input=b"\xff\xfe{", capture_output=True)
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_bad_input_closes_even_with_a_bad_model(self):
+        p, rows = self.cli("garbage", "enforce", model="/nonexistent/model.json")
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"],
+                         "rlo hook input error: input is not JSON")
+
+    def test_unexpected_error_still_exits_zero_and_closes(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)                                    # 기록 경로가 디렉터리 -- 쓰기가 실패한다
+        argv = [sys.executable, "-m", "rlo.hooks", "--model", str(data("cc_tools_model.json")), "--record", str(d)]
+        for mode, want in (("enforce", "rlo hook error: IsADirectoryError"), ("shadow", None)):
+            p = subprocess.run([*argv, "--mode", mode], input="", capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            got = json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"] if p.stdout else None
+            self.assertEqual(got, want)
+
+    def test_adapter_checks_too(self):
+        """Agent SDK 콜백 길도 같은 검사를 지난다(판정 함수를 부르지 않는다)."""
+        rows = []
+        judge = mock.Mock(side_effect=AssertionError("judged"))
+        a = hooks.HookAdapter(judge, mode="enforce", record=lambda k, d: rows.append((k, d)))
+        out = a.handle({"hook_event_name": "PreToolUse", "tool_input": {}, "transcript_path": "/t"})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], "rlo hook input error: missing field tool_name")
+        self.assertEqual(rows, [("input_error", {"event": "PreToolUse", "problem": "missing field tool_name"})])
+        self.assertEqual(asyncio.run(hooks.HookAdapter(judge, mode="shadow").callback({}, None, None)), {})
+        judge.assert_not_called()
+
+    def test_valid_other_events_are_not_input_errors(self):
+        rows = []
+        a = hooks.HookAdapter(lambda d, m: None, mode="enforce", record=lambda k, d: rows.append(k))
+        self.assertEqual(a.handle({"hook_event_name": "PostToolUse"}), {})
+        self.assertEqual(a.handle({"hook_event_name": "Notification"}), {})
+        self.assertEqual(rows, [])
+
+
+IDLE_MS = 11 * 60_000                                # execution_health 의 TTL(Sensor 기본 10 분)을 넘는 쉼
+
+
+@NEEDS_SENSOR
+class StaleHint(unittest.TestCase):
+    """CMD-K10 S2: 낡음만으로 생긴 D 에는 정해진 안내가 붙는다. 판정은 deny 그대로다."""
+
+    def pre(self, inp, now, mode="enforce", grants=("Bash",)):
+        return hooks.guard_hooks(MODEL, mode=mode, grants=grants, clock=lambda: now).handle(inp)
+
+    def reason(self, out):
+        return out["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_stale_only_d_carries_the_hint(self):
+        out = self.pre(hook_input("normal"), now_after("normal") + IDLE_MS)
+        self.assertTrue(self.reason(out).startswith("guard DENY(D): "))
+        self.assertTrue(self.reason(out).endswith(hooks.STALE_HINT))
+        self.assertIn("agent.execution_health", self.reason(out))
+        self.assertEqual(self.pre(hook_input("normal"), now_after("normal") + IDLE_MS, mode="shadow"), {})
+
+    def test_unavailable_key_d_has_no_hint(self):
+        for name in ("parallel", "earlier_pending"):
+            with self.subTest(name=name):
+                out = self.pre(hook_input(name), now_after(name))
+                self.assertTrue(self.reason(out).startswith("guard DENY(D): "))
+                self.assertNotIn("hint:", self.reason(out))
+
+    def test_other_rules_with_stale_d_have_no_hint(self):
+        out = self.pre(hook_input("normal"), now_after("normal") + IDLE_MS, grants=())     # A7 도 걸린다
+        self.assertIn("[A7]", self.reason(out))
+        self.assertNotIn("hint:", self.reason(out))
+
+    def test_read_then_external_passes_as_before(self):
+        """쉼 뒤: Bash 는 D(안내) -> 읽기 하나는 지난다 -> 그 결과 뒤 같은 Bash 는 지난다."""
+        from datetime import datetime, timezone
+        base = data("transcripts/normal_no_current_use.jsonl").read_text(encoding="utf-8").splitlines()
+        t0 = now_after("normal_no_current_use") + IDLE_MS
+        iso = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        sid = json.loads(base[0])["sessionId"]
+        read_use = {"type": "assistant", "sessionId": sid, "uuid": "u0101", "timestamp": iso(t0), "message": {
+            "id": "m9", "model": "claude-x", "role": "assistant", "stop_reason": "tool_use",
+            "usage": {"input_tokens": 100, "output_tokens": 10},
+            "content": [{"type": "tool_use", "id": "tu-r", "name": "Read", "input": {"file_path": "/work/a"}}]}}
+        read_result = {"type": "user", "sessionId": sid, "uuid": "u0102", "timestamp": iso(t0 + 1000), "toolUseResult": {},
+                       "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu-r",
+                                                                "content": [{"type": "text", "text": "x"}], "is_error": False}]}}
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)
+
+        def at(lines, tool, args, tu, now):
+            p = d / f"{tu}.jsonl"
+            p.write_text("".join((x if isinstance(x, str) else json.dumps(x)) + "\n" for x in lines), encoding="utf-8")
+            inp = {"session_id": sid, "transcript_path": str(p), "cwd": "/work", "permission_mode": "default",
+                   "hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": args, "tool_use_id": tu}
+            return self.pre(inp, now)
+
+        bash = {"command": "make"}
+        self.assertTrue(self.reason(at(base, "Bash", bash, "tu-b0", t0 - 500)).endswith(hooks.STALE_HINT))
+        self.assertEqual(at([*base, read_use], "Read", {"file_path": "/work/a"}, "tu-r", t0 + 500), {})
+        self.assertEqual(at([*base, read_use, read_result], "Bash", bash, "tu-b1", t0 + 2000), {})
+
+
 if __name__ == "__main__":
     unittest.main()
