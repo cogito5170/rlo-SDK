@@ -157,6 +157,19 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   전에는 낡음이 풀리지 않는다. 실제 세션(W1)에서 읽기가 듣지 않은 까닭이 이것이다(CMD-K13 S0). 사용자 · 모형의 글만 새로 있는 것은
   어느 경우든 새로 하지 않는다.
 
+- **훅에서는 두 건강 상태에 TTL 이 없다**(S6, BD-246 선택 B). `execution_health` · `tool_execution_health` 의 Sensor TTL 을 훅의
+  설정에서만 끈다(`TranscriptJudge(health_ttl=False)` 기본, Sensor 의 기본 설정 · BD-57/63 은 그대로). 훅은 판정마다 transcript
+  전체에서 다시 세우므로 알려진 값의 나이는 모르는 것이 아니다. 그래서 풀리지 않은 옛 실패(`UNRESOLVED_FAILURES`)는 **값**으로
+  DC · guard 에 가고(값만으로는 막지 않는다, BD-123 B2), D 는 상태를 **모를 때**(UNKNOWN · 없음)만 막는다. 받아들인 값: 실패 없이
+  TTL 보다 오래 쉰 세션도 D 로 막히지 않는다. 예전 동작이 필요하면 `--health-ttl`(재생 · 비교용).
+- **판정 기한**(S7): 호스트는 시간이 다 된 PreToolUse 훅을 막지 않고 지나가게 한다(문서: 명령 훅 기본 600 초). 그래서 판정이
+  `--deadline-s`(기본 120 초, `guard_hooks(deadline_s=)`) 안에 끝나지 않으면 enforce 에서 `rlo hook deadline exceeded` 로 막고
+  react 는 `report`(rule hook, cause deadline). **선언된 통로 호출만은 지나간다**(기록 `guard_deadline` · `allowed: channel:<도구>`).
+  0 이면 기한 없음. 판정은 따로 된 스레드에서 돌고 부수 효과가 없어, 기한을 넘으면 버린다.
+- **판정 비용**: Sensor 는 사건마다 모든 지표를 다시 계산한다 — 10 MB 실제 transcript(L0 사건 1,726)에서 한 번에 약 62 초. 사건을
+  나눠 받는 길이 Sensor 에 없어서(“더 받으려면 모든 사건으로 다시 만든다”) rlo 가 이어 받을 수 없다. Sensor 에 요청했다(baseline#3).
+  그때까지 긴 세션에서는 기한이 지키는 쪽(닫힘 · 통로는 열림)이다.
+
 ### 거부마다 대안 하나 — 턴 안 ReAct (CMD-K11, `rlo/react.py`)
 
 막기만 하면 에이전트가 멈춘다. 그래서 거부마다 **닫힌 대안표**에서 대안 하나를 골라 까닭의 **마지막 줄**에 싣는다.

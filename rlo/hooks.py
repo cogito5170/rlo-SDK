@@ -36,6 +36,11 @@
   (channels: 통로 이슈의 add_issue_comment · issue_read, `ga mail` Bash, send_message)은 지나간다(기록 allowed_while_stale).
   다른 external 호출은 D 그대로. 상태를 모르면(UNKNOWN · 없음) 통로도 막힌다. report 대안은 지금 부를 수 있는 통로 도구를
   이름 짓는다. 낡음은 판정마다 transcript 전체를 다시 거둬 정한다 -- 더 새 도구 결과가 있으면 모형이 아무것도 하지 않아도 풀린다.
+- **훅에서는 두 건강 상태에 TTL 이 없다**(CMD-K13 S6, BD-246 선택 B). 판정마다 transcript 전체에서 다시 세우므로 알려진 값의
+  나이는 모르는 것이 아니다. Sensor 의 시각 규칙(BD-57 · BD-63)은 그대로 -- 풀리지 않은 옛 실패의 UNRESOLVED_FAILURES 는 값으로
+  DC · guard 에 간다(값만으로는 막지 않는다, BD-123 B2). D 는 상태를 모를 때(UNKNOWN · 없음)만 막는다. health_ttl=True 로 되돌린다.
+- **판정 기한**(CMD-K13 S7): 판정이 deadline_s(기본 120 초, 호스트 기본 600 초보다 훨씬 짧게) 안에 끝나지 않으면 enforce 에서
+  막는다(닫는 쪽) -- 시간이 다 된 훅을 호스트는 막지 않고 지나가게 하기 때문이다. 선언된 통로 호출만은 지나간다.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
@@ -45,6 +50,7 @@ import argparse
 import dataclasses
 import json
 import sys
+import threading
 import time
 
 from . import react as R
@@ -53,6 +59,8 @@ PRE, POST, POST_FAIL, STOP, SESSION_END = "PreToolUse", "PostToolUse", "PostTool
 SHADOW, ENFORCE = "shadow", "enforce"
 POLICY = "rlo-hooks@1"
 PURPOSE = "agent_tool_call"
+HEALTH_STATES = ("execution_health", "tool_execution_health")    # 훅에서 TTL 을 두지 않는 상태(S6)
+DEADLINE_S = 120.0                                              # 판정 기한(S7). None 이면 기한 없음
 # 낡음만으로 생긴 D 의 안내(정해진 글 하나). 읽기만 하는 호출(위험 등급 밖, D 가 보지 않는다)의 결과가 상태를 새로 관측한다
 STALE_HINT = (" -- hint: the decision state is stale, not unavailable; make one read-only tool call to refresh it, "
               "then retry")
@@ -113,10 +121,12 @@ class TranscriptJudge:
     sensor_config  Sensor `StateConfig`(문턱. 예: stall_repeat_threshold)
     clock        지금(unix ms)을 주는 함수. 기본은 벽시계 -- transcript 시각과 같은 기준이다
     substitutes  운영자의 대체표 {도구: [같은 목적의 도구, …]}(CMD-K11). A1 의 use_tool 대안이 여기서만 나온다
+    channels     운영자의 통로 선언(CMD-K13, rlo.react.channels_of 의 꼴)
+    health_ttl   False(기본): execution_health · tool_execution_health 에 TTL 을 두지 않는다(S6). True: Sensor 설정 그대로
     """
 
     def __init__(self, model, *, grants=(), risky=None, purpose=PURPOSE, capabilities=None, sensor_config=None,
-                 clock=None, policy: str = POLICY, substitutes=None, channels=None):
+                 clock=None, policy: str = POLICY, substitutes=None, channels=None, health_ttl: bool = False):
         from guard import GuardModel
         from guard.views import DEFAULT_RISKY
         try:
@@ -125,6 +135,10 @@ class TranscriptJudge:
             raise ImportError("훅 판정은 Sensor 가 필요하다 -- pip install \"rlo-sdk[sensor] @ git+…\"") from e
         self.gmodel = GuardModel.from_action_model(model, grants, DEFAULT_RISKY if risky is None else risky)
         self.purpose, self.capabilities, self.policy = purpose, dict(capabilities or {}), policy
+        if not health_ttl:                           # S6: 판정마다 다시 세우는 훅에서는 알려진 값의 나이로 막지 않는다
+            from llmsensor.state import DEFAULT_CONFIG
+            base = sensor_config or DEFAULT_CONFIG
+            sensor_config = base.with_(ttl_ms={**base.ttl_ms, **{k: None for k in HEALTH_STATES}})
         self.sensor_config = sensor_config
         self.clock = clock or (lambda: time.time() * 1000)
         self.substitutes = {k: list(v) for k, v in (substitutes or {}).items()}
@@ -167,8 +181,13 @@ class TranscriptJudge:
         return it, v, res, dcv
 
 
+class DeadlineExceeded(RuntimeError):
+    """판정이 기한 안에 끝나지 않았다(CMD-K13 S7)."""
+
+
 class HookAdapter:
-    def __init__(self, judge, *, mode: str = SHADOW, record=None, observe=None, collected=None):
+    def __init__(self, judge, *, mode: str = SHADOW, record=None, observe=None, collected=None,
+                 deadline_s: "float | None" = None):
         """judge(input_data, mode) -> (ActionIntent, ValidationResult, GuardResult, DCView) · 거두기는 judge.collect 가 있으면.
         record(kind, dict) 기록(없으면 버림) · observe(input_data) 실행 뒤 관측(없으면 버림) ·
         collected(event, run_id, run_state) Stop · SessionEnd 에서 거둔 상태(없으면 버림)."""
@@ -178,6 +197,7 @@ class HookAdapter:
         self.record = record or (lambda kind, d: None)
         self.observe = observe or (lambda d: None)
         self.collected = collected or (lambda ev, run, rs: None)
+        self.deadline_s = deadline_s             # 판정 기한(초). None · 0 이면 기한 없음
 
     def react_for(self, input_data: dict, rule: str, cause: str, tool=None, dcv=None, stale=False) -> dict:
         """닫힌 대안(CMD-K11). 되풀이는 transcript 의 같은 거부로 센다 -- 읽지 못하면 첫 번째로 본다.
@@ -193,9 +213,43 @@ class HookAdapter:
                 obj["tool"] = ch
         return obj
 
+    def _judged(self, input_data: dict):
+        """판정. 기한이 있으면 따로 된 스레드에서 돌리고 기한까지만 기다린다 -- 판정은 부수 효과가 없어 버려도 된다."""
+        if not self.deadline_s:
+            return self.judge(input_data, self.mode)
+        box = {}
+
+        def work():
+            try:
+                box["v"] = self.judge(input_data, self.mode)
+            except BaseException as e:           # noqa: BLE001 -- 이 스레드 밖으로 옮긴다
+                box["e"] = e
+        t = threading.Thread(target=work, name="rlo-judge", daemon=True)
+        t.start()
+        t.join(self.deadline_s)
+        if t.is_alive():
+            raise DeadlineExceeded(self.deadline_s)
+        if "e" in box:
+            raise box["e"]
+        return box["v"]
+
+    def past_deadline(self, input_data: dict) -> dict:
+        """기한을 넘었다: 닫는 쪽(enforce deny) -- 다만 선언된 통로 호출은 지나간다(통로를 끊지 않는다)."""
+        ch = R.channel_of(input_data.get("tool_name"), input_data.get("tool_input"), getattr(self.judge, "channels", None))
+        base = {"tool_use_id": input_data.get("tool_use_id"), "deadline_s": self.deadline_s}
+        if ch is not None:
+            self.record("guard_deadline", dict(base, allowed=f"channel:{ch['tool']}"))
+            return {}
+        obj = self.react_for(input_data, "hook", "deadline")
+        self.record("guard_deadline", dict(base, react=obj))
+        return deny(f"rlo hook deadline exceeded ({self.deadline_s:g}s)" + R.line(obj)) if self.mode == ENFORCE else {}
+
     def pre_tool_use(self, input_data: dict) -> dict:
         try:
-            it, v, res, dcv = self.judge(input_data, self.mode)
+            try:
+                it, v, res, dcv = self._judged(input_data)
+            except DeadlineExceeded:
+                return self.past_deadline(input_data)
             row = {"tool_use_id": input_data.get("tool_use_id"), "tool_name": it.action,
                    "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
                    "dc_id": dcv.dc_id, "complete": dcv.complete,
@@ -259,10 +313,12 @@ class HookAdapter:
         return self.handle(input_data)
 
 
-def guard_hooks(model, *, mode: str = SHADOW, record=None, observe=None, collected=None, **judge_kw) -> HookAdapter:
-    """한 줄로: transcript 판정을 단 훅 어댑터. judge_kw 는 `TranscriptJudge` 의 인자(grants · purpose · …)."""
+def guard_hooks(model, *, mode: str = SHADOW, record=None, observe=None, collected=None,
+                deadline_s: "float | None" = DEADLINE_S, **judge_kw) -> HookAdapter:
+    """한 줄로: transcript 판정을 단 훅 어댑터. judge_kw 는 `TranscriptJudge` 의 인자(grants · purpose · …).
+    deadline_s: 판정 기한(초, 기본 120). None 이면 기한 없음."""
     return HookAdapter(TranscriptJudge(model, **judge_kw), mode=mode, record=record, observe=observe,
-                       collected=collected)
+                       collected=collected, deadline_s=deadline_s)
 
 
 def deny(reason: str) -> dict:
@@ -305,6 +361,10 @@ def _parser():
     ap.add_argument("--stall-threshold", type=int, default=None, help="Sensor stall_repeat_threshold(운영자 문턱)")
     ap.add_argument("--record", default=None, help="판정 기록을 덧붙일 JSONL 경로(없으면 쓰지 않는다)")
     ap.add_argument("--now-ms", type=float, default=None, help="지금(unix ms)을 고정한다 -- 기록된 transcript 를 다시 돌릴 때만")
+    ap.add_argument("--deadline-s", type=float, default=DEADLINE_S,
+                    help=f"판정 기한(초, 기본 {DEADLINE_S:g}). 넘으면 enforce 에서 막는다(통로 호출만 지나간다). 0 이면 기한 없음")
+    ap.add_argument("--health-ttl", action="store_true",
+                    help="두 건강 상태에도 Sensor TTL 을 둔다(CMD-K13 S6 이전 동작 -- 재생 · 비교용)")
     return ap
 
 
@@ -326,7 +386,8 @@ def _adapter_from_args(a, record=None) -> HookAdapter:
         cfg = DEFAULT_CONFIG.with_(stall_repeat_threshold=a.stall_threshold)
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
-                       clock=clock, substitutes=substitutes, channels=channels)
+                       clock=clock, substitutes=substitutes, channels=channels, health_ttl=a.health_ttl,
+                       deadline_s=a.deadline_s or None)
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:

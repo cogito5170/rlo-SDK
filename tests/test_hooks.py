@@ -424,7 +424,7 @@ class StaleHint(unittest.TestCase):
     """CMD-K10 S2: 낡음만으로 생긴 D 에는 정해진 안내가 붙는다. 판정은 deny 그대로다."""
 
     def pre(self, inp, now, mode="enforce", grants=("Bash",)):
-        return hooks.guard_hooks(MODEL, mode=mode, grants=grants, clock=lambda: now).handle(inp)
+        return hooks.guard_hooks(MODEL, mode=mode, grants=grants, clock=lambda: now, health_ttl=True).handle(inp)
 
     def reason(self, out):
         return head(out["hookSpecificOutput"]["permissionDecisionReason"])

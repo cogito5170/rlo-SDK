@@ -67,9 +67,8 @@ class Declarations(unittest.TestCase):
         self.assertIsNone(m("Write", dict(PIN)))
 
 
-@NEEDS_SENSOR
-class StaleReplays(unittest.TestCase):
-    """CMD-K13 D1 -- 6 시간 묵은 transcript(W1 의 경우)."""
+class Fixture(unittest.TestCase):
+    """6 시간 묵은 transcript(W1 의 경우)와 그것을 짓는 손잡이."""
 
     def setUp(self):
         self.d = pathlib.Path(tempfile.mkdtemp())
@@ -82,9 +81,11 @@ class StaleReplays(unittest.TestCase):
     def iso(self, ms):
         return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
-    def adapter(self, grants=("Bash", COMMENT), channels=CHANNELS, mode="enforce", now=None):
+    def adapter(self, grants=("Bash", COMMENT), channels=CHANNELS, mode="enforce", now=None, health_ttl=True):
+        """health_ttl=True: 낡음 D 의 길(통로 · 안내 · 올림)을 본다. 훅의 기본(선택 B, S6)은 아래 OptionB 가 본다."""
         return hooks.guard_hooks(MODEL, mode=mode, grants=grants, channels=R.channels_of({"channels": channels}),
-                                 clock=lambda: now or self.now, record=lambda k, d: self.rows.append((k, d)))
+                                 clock=lambda: now or self.now, record=lambda k, d: self.rows.append((k, d)),
+                                 health_ttl=health_ttl)
 
     def inp(self, tool, args, lines=None, tu="tu-x"):
         p = self.d / f"{tu}.jsonl"
@@ -109,6 +110,11 @@ class StaleReplays(unittest.TestCase):
 
     def react(self, out):
         return json.loads(self.reason(out).splitlines()[-1][len(R.PREFIX):])
+
+
+@NEEDS_SENSOR
+class StaleReplays(Fixture):
+    """CMD-K13 D1 -- 6 시간 묵은 transcript(W1 의 경우)에서 낡음 D 의 길(health_ttl=True)."""
 
     def test_channel_comment_allowed_while_stale_bash_still_d(self):
         a = self.adapter()
@@ -225,7 +231,8 @@ class StaleReplays(unittest.TestCase):
     def test_command_hook_reads_channels_and_refuses_unpinned_ones(self):
         (self.d / "m.json").write_text(json.dumps(dict(MODEL_D, channels=CHANNELS)), encoding="utf-8")
         argv = [sys.executable, "-m", "rlo.hooks", "--model", str(self.d / "m.json"), "--mode", "enforce",
-                "--grant", "Bash", "--grant", COMMENT, "--now-ms", str(self.now), "--record", str(self.d / "r.jsonl")]
+                "--grant", "Bash", "--grant", COMMENT, "--now-ms", str(self.now), "--record", str(self.d / "r.jsonl"),
+                "--health-ttl"]
         p = subprocess.run(argv, input=json.dumps(self.inp(COMMENT, dict(PIN, body="x"))), capture_output=True, text=True)
         self.assertEqual((p.returncode, p.stdout), (0, ""), p.stderr)
         (row,) = [json.loads(x) for x in (self.d / "r.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -244,6 +251,116 @@ class StaleReplays(unittest.TestCase):
                     b = self.adapter(channels=CHANNELS, now=now).handle(hook_input(name))
                     head = lambda o: o and self.reason(o).split("\n-- react: ")[0]
                     self.assertEqual(head(a), head(b))
+
+
+
+@NEEDS_SENSOR
+class OptionB(Fixture):
+    """CMD-K13 S6 (BD-246 선택 B): 훅의 기본은 두 건강 상태에 TTL 이 없다. 값은 그대로 가고(BD-57/63 은 그대로), D 는 모를 때만."""
+
+    def lines_with_old_failure(self):
+        t_fail = now_after("normal_no_current_use")
+        return [*self.base, self.use("tu-f", "Bash", {"command": "cat missing.txt"}, t_fail - 500),
+                self.result("tu-f", "No such file", t_fail, True),
+                self.use("tu-r", "Read", {"file_path": "/a"}, self.now - 3000), self.result("tu-r", "x", self.now - 2000)]
+
+    def test_old_unresolved_failure_no_longer_blocks(self):
+        lines = self.lines_with_old_failure()
+        a = self.adapter(health_ttl=False)
+        self.assertEqual(a.handle(self.inp("Bash", {"command": "make"}, lines=lines)), {})
+        _, rec, _ = a.judge.view(self.inp("Bash", {"command": "make"}, lines=lines))
+        self.assertEqual(rec["core"]["states"]["agent.execution_health"], ["UNRESOLVED_FAILURES", "INFERRED"])
+        b = self.adapter(health_ttl=True)                      # 예전(TTL 그대로)이면 같은 transcript 에서 D
+        self.assertTrue(self.reason(b.handle(self.inp("Bash", {"command": "make"}, lines=lines))).startswith("guard DENY(D)"))
+
+    def test_idle_session_without_failures_passes(self):
+        """받아들인 값: 실패 없이 TTL 보다 오래 쉰 세션은 D 로 막히지 않는다."""
+        self.assertEqual(self.adapter(health_ttl=False).handle(self.inp("Bash", {"command": "make"})), {})
+
+    def test_unknown_state_still_gets_d_and_the_channel_too(self):
+        a = self.adapter(health_ttl=False, now=now_after("parallel"))
+        out = a.handle(hook_input("parallel"))
+        self.assertTrue(self.reason(out).startswith("guard DENY(D)"))
+        self.assertEqual(self.react(out)["cause"], "unavailable")
+        out = a.handle(dict(hook_input("parallel"), tool_name=COMMENT, tool_input=dict(PIN, body="x")))
+        self.assertTrue(self.reason(out).startswith("guard DENY(D)"))
+
+    def test_default_is_b(self):
+        j = hooks.TranscriptJudge(MODEL)
+        self.assertEqual({k: j.sensor_config.ttl_ms[k] for k in hooks.HEALTH_STATES},
+                         {"execution_health": None, "tool_execution_health": None})
+        self.assertEqual(j.sensor_config.ttl_ms["rate_limit_state"], 5 * 60_000)       # 다른 상태의 TTL 은 그대로
+        from llmsensor.state import DEFAULT_CONFIG
+        self.assertEqual(DEFAULT_CONFIG.ttl_ms["execution_health"], 10 * 60_000)        # Sensor 의 기본은 바꾸지 않았다
+        j2 = hooks.TranscriptJudge(MODEL, sensor_config=DEFAULT_CONFIG.with_(stall_repeat_threshold=3))
+        self.assertEqual((j2.sensor_config.ttl_ms["execution_health"], j2.sensor_config.stall_repeat_threshold), (None, 3))
+
+
+class Deadline(unittest.TestCase):
+    """CMD-K13 S7: 판정이 기한을 넘으면 닫는다(enforce) -- 선언된 통로 호출만 지나간다."""
+
+    class Slow:
+        def __init__(self, seconds):
+            self.seconds, self.calls = seconds, 0
+            self.gmodel, self.channels = None, R.channels_of({"channels": CHANNELS})
+
+        def __call__(self, d, mode):
+            import time as _t
+            self.calls += 1
+            _t.sleep(self.seconds)
+            raise AssertionError("never judged in time")
+
+    def adapter(self, mode="enforce", deadline=0.1, seconds=1.0):
+        self.rows = []
+        return hooks.HookAdapter(self.Slow(seconds), mode=mode, deadline_s=deadline,
+                                 record=lambda k, d: self.rows.append((k, d)))
+
+    def pre(self, tool, args):
+        return {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": args, "transcript_path": "/t",
+                "tool_use_id": "tu-d"}
+
+    def test_deadline_denies_fail_closed(self):
+        import time as _t
+        t0 = _t.monotonic()
+        out = self.adapter().handle(self.pre("Bash", {"command": "make"}))
+        self.assertLess(_t.monotonic() - t0, 0.6)                # 1 초 판정을 기다리지 않았다
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertTrue(reason.startswith("rlo hook deadline exceeded (0.1s)"))
+        r = json.loads(reason.splitlines()[-1][len(R.PREFIX):])
+        self.assertEqual((r["kind"], r["rule"], r["cause"], r["escalate"]), ("report", "hook", "deadline", True))
+        self.assertEqual([k for k, _ in self.rows], ["guard_deadline"])
+
+    def test_channel_calls_pass_the_deadline(self):
+        a = self.adapter()
+        self.assertEqual(a.handle(self.pre(COMMENT, dict(PIN, body="slow guard"))), {})
+        self.assertEqual(a.handle(self.pre("Bash", {"command": "ga mail send --to amp blocked"})), {})
+        self.assertEqual([d.get("allowed") for _, d in self.rows], [f"channel:{COMMENT}", "channel:Bash"])
+        out = a.handle(self.pre(COMMENT, dict(PIN, issue_number=9, body="x")))      # 고정이 다르면 통로가 아니다
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_shadow_records_and_passes(self):
+        self.assertEqual(self.adapter(mode="shadow").handle(self.pre("Bash", {"command": "make"})), {})
+        self.assertEqual(self.rows[0][0], "guard_deadline")
+
+    def test_fast_judgement_is_unaffected(self):
+        def judge(d, mode):
+            raise RuntimeError("boom")                          # 기한 안에 끝난 판정의 예외는 예전처럼(guard error)
+        out = hooks.HookAdapter(judge, mode="enforce", deadline_s=5).handle(self.pre("Bash", {"command": "make"}))
+        self.assertTrue(out["hookSpecificOutput"]["permissionDecisionReason"].startswith("guard error: RuntimeError"))
+
+    @NEEDS_SENSOR
+    def test_command_hook_wires_the_deadline(self):
+        model = str(data("cc_tools_model.json"))
+        self.assertEqual(hooks._adapter_from_args(hooks._parser().parse_args(["--model", model])).deadline_s, 120.0)
+        self.assertEqual(hooks._adapter_from_args(hooks._parser().parse_args(["--model", model, "--deadline-s", "7"])).deadline_s, 7.0)
+        self.assertIsNone(hooks._adapter_from_args(hooks._parser().parse_args(["--model", model, "--deadline-s", "0"])).deadline_s)
+
+    def test_command_hook_has_the_deadline(self):
+        a = hooks._parser().parse_args(["--model", "m.json"])
+        self.assertEqual(a.deadline_s, hooks.DEADLINE_S)
+        self.assertLess(hooks.DEADLINE_S, 600 / 2)               # 호스트 기본(600 초)보다 훨씬 짧다
+        import inspect
+        self.assertEqual(inspect.signature(hooks.guard_hooks).parameters["deadline_s"].default, 120.0)
 
 
 if __name__ == "__main__":

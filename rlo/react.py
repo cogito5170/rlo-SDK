@@ -45,6 +45,7 @@ TABLE = {
     ("input", "malformed_input"): "report",
     ("config", "config_error"): "report",
     ("hook", "hook_error"): "report",
+    ("hook", "deadline"): "report",                  # 판정이 기한을 넘었다(CMD-K13 S7) -- 다시 해도 같다, 통로로 올린다
 }
 
 

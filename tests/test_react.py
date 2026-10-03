@@ -136,7 +136,7 @@ class W1Cases(unittest.TestCase):
         self.rows = []
 
     def adapter(self, mode="enforce", grants=("Bash",), subs=SUBS, now=None):
-        return hooks.guard_hooks(MODEL, mode=mode, grants=grants, substitutes=subs,
+        return hooks.guard_hooks(MODEL, mode=mode, grants=grants, substitutes=subs, health_ttl=True,
                                  clock=lambda: now, record=lambda k, d: self.rows.append((k, d)))
 
     def inp(self, lines, tool, args, tu):
