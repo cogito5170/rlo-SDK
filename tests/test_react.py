@@ -269,6 +269,36 @@ class W1Cases(unittest.TestCase):
                     head = lambda o: o["hookSpecificOutput"]["permissionDecisionReason"].split("\n-- react: ")[0]
                     self.assertEqual(head(a), head(b))
 
+    def test_model_file_judges_the_same_with_or_without_substitutes(self):
+        """CMD-K11 D5: 같은 모형 파일에 substitutes 가 있든 없든 읽힌 모형 · 판정 · 기록이 같다(react 객체만 다를 수 있다).
+        action 쪽은 그대로다 -- 대체표는 rlo 가 떼어 내고, 남은 것은 action-model/1 그대로 읽힌다."""
+        (self.dir / "plain.json").write_text(json.dumps(MODEL_D), encoding="utf-8")
+        (self.dir / "subs.json").write_text(json.dumps(dict(MODEL_D, substitutes={**SUBS, "Bash": [ISSUE_READ]})),
+                                            encoding="utf-8")
+        plain, none = R.load_model(str(self.dir / "plain.json"))
+        with_subs, subs = R.load_model(str(self.dir / "subs.json"))
+        self.assertEqual(plain.to_dict(), with_subs.to_dict())               # 남은 것은 같은 action-model/1
+        self.assertEqual((none, subs), ({}, {**SUBS, "Bash": [ISSUE_READ]}))
+        cases = [(hook_input(n), now_after(n)) for n in ("normal", "parallel", "after_failure", "earlier_pending")]
+        cases += [(hook_input("normal") | {"tool_name": "ReadNotifications", "tool_input": {}}, now_after("normal")),
+                  (hook_input("normal") | {"tool_name": "Edit", "tool_input": {"file_path": "/a", "dry_run": True}},
+                   now_after("normal")),
+                  (hook_input("normal"), now_after("normal") + IDLE_MS)]
+        strip = lambda rows: [(k, {f: v for f, v in d.items() if f != "react"}) for k, d in rows]
+        head = lambda o: o and o["hookSpecificOutput"]["permissionDecisionReason"].split("\n-- react: ")[0]
+        for mode in ("enforce", "shadow"):
+            for grants in (("Bash",), ()):
+                for inp, now in cases:
+                    with self.subTest(mode=mode, grants=grants, tool=inp["tool_name"], now=now):
+                        got = []
+                        for path in ("plain.json", "subs.json"):
+                            model, s = R.load_model(str(self.dir / path))
+                            rows = []
+                            out = hooks.guard_hooks(model, mode=mode, grants=grants, substitutes=s, clock=lambda: now,
+                                                    record=lambda k, d: rows.append((k, d))).handle(inp)
+                            got.append((bool(out), head(out), strip(rows)))
+                        self.assertEqual(got[0], got[1])
+
     def test_command_hook_reads_substitutes_from_the_model_file(self):
         (self.dir / "m.json").write_text(json.dumps(dict(MODEL_D, substitutes=SUBS)), encoding="utf-8")
         inp = self.inp(self.base(), "ReadNotifications", {}, "tu-c")
