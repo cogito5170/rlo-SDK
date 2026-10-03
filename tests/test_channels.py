@@ -163,14 +163,30 @@ class StaleReplays(unittest.TestCase):
         self.assertEqual((self.react(out)["kind"], self.react(out)["cause"]), ("refresh_read", "stale"))
 
     def test_a_denied_calls_own_result_refreshes_the_state(self):
-        """찾은 것: Claude Code 는 막힌 호출에도 tool_result(is_error, 까닭)를 남긴다(K7). 그것이 더 새 도구 결과라서
-        execution_health 가 UNRESOLVED_FAILURES(쓸 만함)로 새로 서고, 다음 호출은 지나간다 -- 낡음 D 는 한 번 막고 스스로 풀린다."""
+        """Claude Code 는 막힌 호출에도 tool_result(is_error, 까닭)를 남긴다(K7). 옛 실패가 없으면 그것이 더 새 도구 결과라서
+        execution_health 가 UNRESOLVED_FAILURES(쓸 만함)로 새로 서고 다음 호출은 지나간다. 풀리지 않은 옛 실패가 있으면 그렇지
+        않다(BD-57 · BD-63, CMD-K13 S0) -- 아래 시험."""
         a = self.adapter()
         out = a.handle(self.inp("Bash", {"command": "make"}, tu="tu-0"))
         self.assertEqual(self.react(out)["kind"], "refresh_read")
         lines = [*self.base, self.use("tu-0", "Bash", {"command": "make"}, self.now - 9000),
                  self.result("tu-0", self.reason(out), self.now - 8000, True)]
         self.assertEqual(a.handle(self.inp("Bash", {"command": "make"}, lines=lines, tu="tu-1")), {})
+
+    def test_an_old_unresolved_failure_keeps_d_stale_through_reads(self):
+        """S0 의 원인(실제 transcript 에서 찾은 것을 합성으로 고정): 6 시간 전 실패한 Bash 겨냥이 풀리지 않았으면 execution_health 는
+        UNRESOLVED_FAILURES 이고 그 시각은 그 실패의 시각이다(BD-57 · BD-63). 그 뒤 새 읽기 결과가 있어도 낡음 D 는 그대로다."""
+        t_fail = now_after("normal_no_current_use")
+        lines = [*self.base, self.use("tu-f", "Bash", {"command": "cat missing.txt"}, t_fail - 500),
+                 self.result("tu-f", "No such file", t_fail, True),
+                 self.use("tu-r", "Read", {"file_path": "/a"}, self.now - 3000), self.result("tu-r", "x", self.now - 2000)]
+        a = self.adapter()
+        out = a.handle(self.inp("Bash", {"command": "make"}, lines=lines))
+        self.assertTrue(self.reason(out).startswith("guard DENY(D)"))
+        self.assertEqual((self.react(out)["kind"], self.react(out)["cause"]), ("refresh_read", "stale"))
+        _, rec, _ = a.judge.view(self.inp("Bash", {"command": "make"}, lines=lines))
+        self.assertEqual(rec["core"]["states"]["agent.execution_health"], [None, "STALE"])
+        self.assertEqual(a.handle(self.inp(COMMENT, dict(PIN, body="blocked"), lines=lines)), {})   # 통로는 열려 있다
 
     def test_third_identical_d_escalates_through_a_callable_channel(self):
         """S3: 같은 D 의 세 번째는 report · escalate, 그리고 부를 수 있는 통로 도구를 이름 짓는다. 낡음 D 는 transcript 에서
