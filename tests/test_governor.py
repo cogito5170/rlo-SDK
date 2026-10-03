@@ -607,7 +607,7 @@ class ConcurrentTools(unittest.TestCase):
 class AutonomyGoverned(unittest.TestCase):
     """CMD-K12 S4: Autonomy(governor=) -- 예산이 비었거나 429 면 미룬 결과, tick · close_windows 가 다시 보낸다."""
 
-    def build(self, fail_on=(), rpm=1):
+    def build(self, fail_on=(), rpm=1, retry="7s"):
         from ms.providers import ProviderError, make_provider
         from rlo.example import world
         spec, obs, tools = world()
@@ -618,7 +618,7 @@ class AutonomyGoverned(unittest.TestCase):
         def gen(req):
             self.calls.append(c())
             if len(self.calls) in fail_on:
-                raise ProviderError("429", status=429, body=gemini_429("7s"), headers={})
+                raise ProviderError("429", status=429, body=gemini_429(retry), headers={})
             return orig(req)
         inner.generate = gen
         now = spec["now"]
@@ -680,6 +680,18 @@ class AutonomyGoverned(unittest.TestCase):
         self.assertEqual(a._gp.inline_waits, [60.0])
         self.assertEqual(self.c.sleeps, [60.0])
         self.assertEqual(a.parked, [])
+
+    def test_new_request_never_overtakes_a_reparked_step(self):
+        """다시 보낸 걸음이 대기 0 초를 선언한 429 로 다시 세워져도(창에는 자리가 있다) 새 요청은 그 뒤에 선다."""
+        from rlo.example import TASK
+        a, spec = self.build(fail_on=(2, 3), rpm=10, retry="0s")
+        self.assertEqual(a.handle(TASK, queries=spec["queries"]).outcome, "executed")
+        first = a.handle(TASK, queries=spec["queries"])          # 둘째 부름이 429 -- step-1
+        self.assertEqual((first.outcome, first.step_id, first.wait_s), ("deferred", "step-1", 0.0))
+        third = a.handle(TASK, queries=spec["queries"])          # tick 이 step-1 을 다시 보냄 -> 셋째 부름도 429 -> 다시 세움
+        self.assertEqual((third.outcome, third.step_id), ("deferred", "step-2"))
+        self.assertEqual([p["step_id"] for p in a.parked], ["step-1", "step-2"])
+        self.assertEqual(len(self.calls), 3)                     # 새 요청은 부르지 않았다
 
     def test_without_governor_nothing_changes(self):
         from rlo.example import one_turn
