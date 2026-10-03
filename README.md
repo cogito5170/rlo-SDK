@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.5.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.6.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -130,6 +130,41 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   refresh it, then retry`. 읽기 도구(Read · Grep, 위험 등급 read)는 D 밖이라 지나고, 그 결과가 상태를 새로 관측한다 —
   그 뒤 같은 호출은 지난다(시험 `StaleHint`). 판정은 deny 그대로이고, 상태를 지어내거나 시계를 바꾸지 않는다.
   나란히 부른 호출처럼 상태를 **모르는**(UNKNOWN) D 에는 붙지 않는다.
+
+### 거부마다 대안 하나 — 턴 안 ReAct (CMD-K11, `rlo/react.py`)
+
+막기만 하면 에이전트가 멈춘다. 그래서 거부마다 **닫힌 대안표**에서 대안 하나를 골라 까닭의 **마지막 줄**에 싣는다.
+판정은 deny 그대로이고, 대안을 고르는 데 자유 글 · LLM 을 쓰지 않는다.
+
+```
+guard DENY(A1): [A1] 행동 ReadNotifications 는 이 문맥에서 제안되지 않았다
+-- react: {"attempt":1,"cause":"has_substitute","escalate":false,"kind":"use_tool","of":2,"rule":"A1","tool":"mcp__github__issue_read"}
+```
+
+| 막힘 (rule, cause) | 대안 `kind` | 뜻 |
+|---|---|---|
+| A1 `has_substitute` | `use_tool` (+ `tool`) | 같은 목적의 대체 도구로 |
+| A1 `no_substitute` | `report` | 하지 않고 통로에 올린다 |
+| A4 `unknown_args` | `drop_unknown_args` | 모형에 없는 인자를 빼고 한 번 |
+| A7 `not_granted` | `report` | 허가는 대안으로 풀지 않는다(D 와 함께 걸려도) |
+| D `stale` | `refresh_read` | 읽기 호출 하나 뒤 다시(위 K10 안내와 같은 경우) |
+| D `unavailable` | `wait_previous` | 앞 호출의 결과를 기다린 뒤 다시 |
+| `input` · `config` · `hook` · E | `report` | 꼴이 틀린 입력 · 설정 오류 · 훅 · 판정 오류 |
+| 그 밖(A4 `bad_args`, A5 · A6 · A8) | `none` | 대안 없음 |
+
+- `report` 이면 `escalate: true` 다. **같은 (도구, 규칙, 원인) 거부의 세 번째**(`attempt` 3 of 2)도 `report` · `escalate` 가 된다.
+  되풀이는 transcript 에서 그 도구의 tool_result 에 실린 `-- react:` 줄로 센다. 그 도구가 거부 아닌 결과를 받으면 1 부터.
+- `--record` 의 guard · input_error · guard_error 줄에 같은 객체가 `react` 로 들어간다. **shadow 는 기록만** 하고 아무것도 내지 않는다.
+- **대체표(`substitutes`)는 운영자 몫**이다. 모형 파일에 action-model/1 칸 옆으로 둔다. rlo 가 읽고 떼어 낸 뒤 나머지를 action-model/1 로 읽는다.
+  action-model/1 계약은 바꾸지 않았다(`ActionModel.from_dict` 는 모르는 칸을 받지 않는다).
+
+  ```json
+  {"schema": "action-model/1", "version": "…", "specs": [ … ],
+   "substitutes": {"ReadNotifications": ["mcp__github__issue_read"]}}
+  ```
+
+- **대안은 허가를 넓히지 않는다.** `use_tool` 은 모형에 있고, external · irreversible 이면 `--grant` 로 허가된 도구만 이름 짓는다.
+  그런 대체가 없으면 `report` 다. grants 는 읽기만 한다. 대체표의 꼴이 틀리면 설정 오류다(enforce 에서 막는다).
 - 모형에 없는 도구는 A1, 모르는 인자는 A4, 허가 없는 external · irreversible 은 A7 로 막힌다(enforce).
 - **모형 밖 도구는 enforce 에서 막힌다.** 실제 Claude Code 6 실행(K7)에서 도구 호출 16 가운데 4 가 그랬다(Grep · Edit, 그때는
   예시 모형 밖). Glob · TodoWrite · Task · WebFetch 등은 지금도 예시 모형 밖이다. 그러니 **모형을 넓히기 전에는 shadow 로 쓴다.**

@@ -125,9 +125,8 @@ def main(cmd: str, argv) -> int:
     try:
         command = None
         if cmd == "install-hook":
-            from action.spec import ActionModel
-            with open(a.model, encoding="utf-8") as f:
-                ActionModel.from_dict(json.load(f))          # 틀린 모형은 깔지 않는다
+            from .react import load_model
+            load_model(a.model)                               # 틀린 모형은 깔지 않는다(substitutes 칸 포함, CMD-K11)
             command = hook_command(model=a.model, mode=a.mode, grants=a.grant, purpose=a.purpose,
                                    stall_threshold=a.stall_threshold, record=a.record, python=a.python)
         out = install(a.settings, command=command, remove=cmd == "uninstall-hook")

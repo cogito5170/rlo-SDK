@@ -25,6 +25,19 @@ except ImportError:
 NEEDS_SENSOR = unittest.skipUnless(SENSOR, "훅 판정은 Sensor 가 필요하다 -- rlo-sdk[sensor] 로 깔면 돈다")
 
 MODEL = ActionModel.from_dict(json.loads(data("cc_tools_model.json").read_text(encoding="utf-8")))
+
+
+def head(reason: str) -> str:
+    """거부 까닭에서 마지막 `-- react:` 줄(CMD-K11)을 뺀 앞부분."""
+    return reason.split("\n-- react: ", 1)[0]
+
+
+def react_of(out: dict) -> dict:
+    """거부 응답의 react 객체. 까닭의 마지막 줄이어야 한다."""
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    last = reason.splitlines()[-1]
+    assert last.startswith("-- react: "), reason
+    return json.loads(last[len("-- react: "):])
 PRE_ALL = ("normal", "normal_no_current_use", "after_failure", "read_after_failure", "parallel", "first_call",
            "first_call_no_current_use", "earlier_pending")
 
@@ -222,14 +235,14 @@ class Closing(Base):
     def test_missing_transcript_closes_only_in_enforce(self):
         bad = dict(hook_input("normal"), transcript_path="/nonexistent/t.jsonl")
         out = self.adapter("normal", "enforce").handle(bad)
-        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], "guard error: FileNotFoundError")
+        self.assertEqual(head(out["hookSpecificOutput"]["permissionDecisionReason"]), "guard error: FileNotFoundError")
         self.assertEqual(self.adapter("normal", "shadow").handle(bad), {})
 
     def test_judge_error_message_does_not_leak(self):
         def boom(d, mode):
             raise RuntimeError("secret detail")
         out = hooks.HookAdapter(boom, mode="enforce").handle(hook_input("normal"))
-        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], "guard error: RuntimeError")
+        self.assertEqual(head(out["hookSpecificOutput"]["permissionDecisionReason"]), "guard error: RuntimeError")
         self.assertEqual(hooks.HookAdapter(boom, mode="shadow").handle(hook_input("normal")), {})
 
     def test_never_emits_allow(self):
@@ -270,7 +283,7 @@ class CommandHook(unittest.TestCase):
     def test_bad_config_closes_pre_tool_use_in_enforce_only(self):
         p = self.cli(hook_input("normal"), "--mode", "enforce", model="/nonexistent/model.json")
         self.assertEqual(p.returncode, 0)
-        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"],
+        self.assertEqual(head(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]),
                          "rlo hook config error: FileNotFoundError")
         p = self.cli(hook_input("normal"), "--mode", "shadow", model="/nonexistent/model.json")
         self.assertEqual((p.returncode, p.stdout), (0, ""))
@@ -307,7 +320,7 @@ class WithoutSensor(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"llmsensor": None}):
             hooks.main(["--model", str(data("cc_tools_model.json")), "--mode", "enforce"],
                        stdin=io.StringIO(json.dumps(hook_input("normal"))), stdout=out)
-        self.assertEqual(json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecisionReason"],
+        self.assertEqual(head(json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]),
                          "rlo hook config error: ImportError")
 
 
@@ -349,7 +362,7 @@ class MalformedInput(unittest.TestCase):
                 self.assertEqual(p.returncode, 0, p.stderr)
                 out = json.loads(p.stdout)["hookSpecificOutput"]
                 self.assertEqual((out["hookEventName"], out["permissionDecision"]), ("PreToolUse", "deny"))
-                self.assertEqual(out["permissionDecisionReason"], f"rlo hook input error: {problem}")
+                self.assertEqual(head(out["permissionDecisionReason"]), f"rlo hook input error: {problem}")
                 self.assertEqual([(r["kind"], r["problem"]) for r in rows], [("input_error", problem)])
                 self.assertNotIn("secret-xyz", p.stdout + json.dumps(rows))      # 값은 싣지 않는다
 
@@ -369,7 +382,7 @@ class MalformedInput(unittest.TestCase):
     def test_bad_input_closes_even_with_a_bad_model(self):
         p, rows = self.cli("garbage", "enforce", model="/nonexistent/model.json")
         self.assertEqual(p.returncode, 0)
-        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"],
+        self.assertEqual(head(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]),
                          "rlo hook input error: input is not JSON")
 
     def test_unexpected_error_still_exits_zero_and_closes(self):
@@ -379,7 +392,7 @@ class MalformedInput(unittest.TestCase):
         for mode, want in (("enforce", "rlo hook error: IsADirectoryError"), ("shadow", None)):
             p = subprocess.run([*argv, "--mode", mode], input="", capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
-            got = json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"] if p.stdout else None
+            got = head(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]) if p.stdout else None
             self.assertEqual(got, want)
 
     def test_adapter_checks_too(self):
@@ -388,8 +401,10 @@ class MalformedInput(unittest.TestCase):
         judge = mock.Mock(side_effect=AssertionError("judged"))
         a = hooks.HookAdapter(judge, mode="enforce", record=lambda k, d: rows.append((k, d)))
         out = a.handle({"hook_event_name": "PreToolUse", "tool_input": {}, "transcript_path": "/t"})
-        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], "rlo hook input error: missing field tool_name")
-        self.assertEqual(rows, [("input_error", {"event": "PreToolUse", "problem": "missing field tool_name"})])
+        self.assertEqual(head(out["hookSpecificOutput"]["permissionDecisionReason"]),
+                         "rlo hook input error: missing field tool_name")
+        self.assertEqual(rows, [("input_error", {"event": "PreToolUse", "problem": "missing field tool_name",
+                                                 "react": react_of(out)})])
         self.assertEqual(asyncio.run(hooks.HookAdapter(judge, mode="shadow").callback({}, None, None)), {})
         judge.assert_not_called()
 
@@ -412,7 +427,7 @@ class StaleHint(unittest.TestCase):
         return hooks.guard_hooks(MODEL, mode=mode, grants=grants, clock=lambda: now).handle(inp)
 
     def reason(self, out):
-        return out["hookSpecificOutput"]["permissionDecisionReason"]
+        return head(out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_stale_only_d_carries_the_hint(self):
         out = self.pre(hook_input("normal"), now_after("normal") + IDLE_MS)

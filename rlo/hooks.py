@@ -29,6 +29,9 @@
   0 아닌 종료를 막지 않음으로 보는 호스트가 있다.
 - **낡음만으로 생긴 D 에는 되살리는 법을 붙인다**(CMD-K10 S2). D 의 쓸 수 없는 필수 키가 모두 STALE(UNKNOWN · 없음이
   하나도 없음)이고 걸린 규칙이 D 뿐이면, 까닭 끝에 정해진 안내 `STALE_HINT` 를 붙인다. 판정은 그대로 deny 다.
+- **거부마다 닫힌 대안 하나**(CMD-K11, `rlo/react.py`). 까닭의 마지막 줄은 `-- react: {json}`(kind · rule · cause ·
+  tool · attempt · of · escalate), 기록 줄에도 같은 객체. 같은 (도구, 규칙, 원인) 거부의 세 번째는 report · escalate.
+  shadow 는 기록만 한다. 대안은 허가를 넓히지 않는다.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
@@ -39,6 +42,8 @@ import dataclasses
 import json
 import sys
 import time
+
+from . import react as R
 
 PRE, POST, POST_FAIL, STOP, SESSION_END = "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"
 SHADOW, ENFORCE = "shadow", "enforce"
@@ -103,10 +108,11 @@ class TranscriptJudge:
     capabilities DC 능력(예: {"human_reviewer": True})
     sensor_config  Sensor `StateConfig`(문턱. 예: stall_repeat_threshold)
     clock        지금(unix ms)을 주는 함수. 기본은 벽시계 -- transcript 시각과 같은 기준이다
+    substitutes  운영자의 대체표 {도구: [같은 목적의 도구, …]}(CMD-K11). A1 의 use_tool 대안이 여기서만 나온다
     """
 
     def __init__(self, model, *, grants=(), risky=None, purpose=PURPOSE, capabilities=None, sensor_config=None,
-                 clock=None, policy: str = POLICY):
+                 clock=None, policy: str = POLICY, substitutes=None):
         from guard import GuardModel
         from guard.views import DEFAULT_RISKY
         try:
@@ -117,6 +123,7 @@ class TranscriptJudge:
         self.purpose, self.capabilities, self.policy = purpose, dict(capabilities or {}), policy
         self.sensor_config = sensor_config
         self.clock = clock or (lambda: time.time() * 1000)
+        self.substitutes = {k: list(v) for k, v in (substitutes or {}).items()}
 
     def collect(self, input_data: dict, *, exclude_current: bool = False):
         """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState). exclude_current 면 지금 호출을 뺀다(PreToolUse)."""
@@ -167,20 +174,36 @@ class HookAdapter:
         self.observe = observe or (lambda d: None)
         self.collected = collected or (lambda ev, run, rs: None)
 
+    def react_for(self, input_data: dict, rule: str, cause: str, tool=None) -> dict:
+        """닫힌 대안(CMD-K11). 되풀이는 transcript 의 같은 거부로 센다 -- 읽지 못하면 첫 번째로 본다."""
+        try:
+            prior = R.prior_denies(input_data["transcript_path"], input_data["tool_name"], rule, cause)
+        except Exception:
+            prior = 0
+        return R.react(rule, cause, tool, prior)
+
     def pre_tool_use(self, input_data: dict) -> dict:
         try:
             it, v, res, dcv = self.judge(input_data, self.mode)
-            self.record("guard", {"tool_use_id": input_data.get("tool_use_id"), "tool_name": it.action,
-                                  "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
-                                  "dc_id": dcv.dc_id, "complete": dcv.complete,
-                                  "missing_required": list(dcv.missing_required), "result": res.to_dict()})
+            obj = None
+            if res.verdict != "ALLOW":
+                rule, cause, tool = R.classify(it, res, dcv, getattr(self.judge, "gmodel", None),
+                                               getattr(self.judge, "substitutes", None))
+                obj = self.react_for(input_data, rule, cause, tool)
+            row = {"tool_use_id": input_data.get("tool_use_id"), "tool_name": it.action,
+                   "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
+                   "dc_id": dcv.dc_id, "complete": dcv.complete,
+                   "missing_required": list(dcv.missing_required), "result": res.to_dict()}
+            self.record("guard", dict(row, react=obj) if obj else row)
             if self.mode == ENFORCE and res.verdict != "ALLOW":
                 hint = STALE_HINT if stale_only(res, dcv) else ""                 # 자르기 뒤에 붙인다 -- 잘리지 않게
-                return deny(f"guard {res.verdict}({res.rule}): " + "; ".join(res.reasons)[:500] + hint)
+                return deny(f"guard {res.verdict}({res.rule}): " + "; ".join(res.reasons)[:500] + hint + R.line(obj))
             return {}
         except Exception as e:                     # 닫는 쪽: enforce 면 막는다. 메시지는 종류만
-            self.record("guard_error", {"tool_use_id": input_data.get("tool_use_id"), "exception": type(e).__name__})
-            return deny(f"guard error: {type(e).__name__}") if self.mode == ENFORCE else {}
+            obj = self.react_for(input_data, "E", "guard_error")
+            self.record("guard_error", {"tool_use_id": input_data.get("tool_use_id"), "exception": type(e).__name__,
+                                        "react": obj})
+            return deny(f"guard error: {type(e).__name__}" + R.line(obj)) if self.mode == ENFORCE else {}
 
     def post_tool_use(self, input_data: dict) -> dict:
         self.observe(input_data)                   # 거두지 않는다 -- 결과는 다음 훅 때 transcript 에서 온다(BD-122 (2))
@@ -199,8 +222,9 @@ class HookAdapter:
     def bad_input(self, problem: str, input_data=None) -> dict:
         """꼴이 틀린 입력(CMD-K10 S1): 기록 한 줄, enforce 면 PreToolUse deny(무슨 사건인지 믿을 수 없으니 닫는다)."""
         ev = input_data.get("hook_event_name") if isinstance(input_data, dict) else None
-        self.record("input_error", {"event": ev if isinstance(ev, str) else None, "problem": problem})
-        return deny(f"rlo hook input error: {problem}") if self.mode == ENFORCE else {}
+        obj = R.react("input", "malformed_input")
+        self.record("input_error", {"event": ev if isinstance(ev, str) else None, "problem": problem, "react": obj})
+        return deny(f"rlo hook input error: {problem}" + R.line(obj)) if self.mode == ENFORCE else {}
 
     def handle(self, input_data: dict) -> dict:
         problem = input_problem(input_data)
@@ -280,16 +304,14 @@ def _recorder(path):
 
 
 def _adapter_from_args(a, record=None) -> HookAdapter:
-    from action.spec import ActionModel
-    with open(a.model, encoding="utf-8") as f:
-        model = ActionModel.from_dict(json.load(f))
+    model, substitutes = R.load_model(a.model)         # substitutes 는 모형 파일 옆 칸(action-model/1 밖, CMD-K11)
     cfg = None
     if a.stall_threshold is not None:
         from llmsensor.state import DEFAULT_CONFIG
         cfg = DEFAULT_CONFIG.with_(stall_repeat_threshold=a.stall_threshold)
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
-                       clock=clock)
+                       clock=clock, substitutes=substitutes)
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:
@@ -311,12 +333,14 @@ def main(argv=None, stdin=None, stdout=None) -> int:
                 adapter = _adapter_from_args(a, record)
             except Exception as e:                 # 설정이 틀려도 enforce 의 PreToolUse 는 닫는다
                 if a.mode == ENFORCE and data.get("hook_event_name") == PRE:
-                    json.dump(deny(f"rlo hook config error: {type(e).__name__}"), stdout)
+                    json.dump(deny(f"rlo hook config error: {type(e).__name__}"
+                                   + R.line(R.react("config", "config_error"))), stdout)
                 return 0
             out = adapter.handle(data)
     except Exception as e:                         # 예상 못 한 예외(기록 쓰기 실패 …)도 종료 0 으로 닫는다
         ev = data.get("hook_event_name") if isinstance(data, dict) else None
-        out = deny(f"rlo hook error: {type(e).__name__}") if a.mode == ENFORCE and ev in (PRE, None) else {}
+        out = (deny(f"rlo hook error: {type(e).__name__}" + R.line(R.react("hook", "hook_error")))
+               if a.mode == ENFORCE and ev in (PRE, None) else {})
     if out:
         json.dump(out, stdout)
     return 0
