@@ -381,7 +381,7 @@ class SavedState(unittest.TestCase):
         self.assertEqual(second["failed"], {})
         self.assertEqual(second["done"], ["m1", "m2", "m3", "t1", "t2"])
         self.assertEqual(second["status"], {"resumes_in_s": None, "done": ["t1", "m1", "m2", "t2", "m3"],
-                                            "running": None, "parked": [], "next": []})
+                                            "running": None, "running_all": [], "parked": [], "next": []})
         # 지킴이 창이 되살아났다: 30 초에 다시 띄웠어도 60 초 전에는 부르지 않았다. m1 은 다시 부르지 않았다
         self.assertEqual(second["calls"], [[60.0, "b"], [120.0, "c:ok a:data|ok b"]])
 
@@ -404,7 +404,8 @@ class SavedState(unittest.TestCase):
                  Step("m1", "plan", payload="p1"), Step("m2", "plan", payload="p2"),
                  Step("t2", "render", fn=lambda r: look(("tool", "t2")), after=("m2",)),
                  Step("t3", "check", fn=lambda r: look(("tool", "t3")), not_before=30.0)]
-        s = Scheduler(steps, g, provider, kinds=KINDS, clock=c, sleep=c.sleep, on_event=lambda row: look(row))
+        s = Scheduler(steps, g, provider, kinds=KINDS, clock=c, sleep=c.sleep, on_event=lambda row: look(row),
+                      max_parallel=1)                      # 하나씩: 도는 걸음이 늘 하나라 어느 때나 정해진다(함께 돌 때는 아래)
         holder["s"] = s
         r = s.run()
         self.assertTrue(r.ok)
@@ -462,6 +463,145 @@ class SavedState(unittest.TestCase):
         self.assertTrue(math.isinf(h.wait_s(model="b")))
         with self.assertRaises(ValueError):
             Governor({"a": {"rpm": 2}}, clock=c).load(d)
+
+
+class ConcurrentTools(unittest.TestCase):
+    """CMD-K12 S7 · D6: 준비된 도구 걸음은 크기가 정해진 풀에서 함께 돈다(실제 스레드 · 실제 시간)."""
+
+    DT = 0.3                                                   # 걸음 하나가 자는 실제 시간
+
+    def run_tools(self, n=4, max_parallel=4, extra=(), budgets=None, provider=None, **kw):
+        import time as _t
+        c = Clock()
+        g = Governor(budgets or {"m": {"rpm": 1}}, clock=c)
+        p = provider or Provider(c)
+        tools = [Step(f"t{i}", "read", fn=lambda r, i=i: (_t.sleep(self.DT), i)[1]) for i in range(n)]
+        s = Scheduler([*extra, *tools], g, p, kinds=KINDS, clock=c, sleep=c.sleep, max_parallel=max_parallel, **kw)
+        t0 = _t.monotonic()
+        r = s.run()
+        return r, _t.monotonic() - t0, c, p
+
+    def test_four_tools_take_about_one_step_not_four(self):
+        r, wall, _, _ = self.run_tools()
+        self.assertTrue(r.ok)
+        self.assertEqual({k: r.done[k] for k in ("t0", "t1", "t2", "t3")}, {"t0": 0, "t1": 1, "t2": 2, "t3": 3})
+        self.assertLess(wall, 2.5 * self.DT)                   # 넷이 함께: 한 걸음 시간 남짓(하나씩이면 4 배)
+        r1, wall1, _, _ = self.run_tools(max_parallel=1)
+        self.assertGreaterEqual(wall1, 4 * self.DT * 0.95)    # max_parallel=1 은 예전처럼 하나씩
+
+    def test_pool_is_bounded(self):
+        import threading
+        live, peak, lock = [0], [0], threading.Lock()
+
+        def tool(r):
+            import time as _t
+            with lock:
+                live[0] += 1
+                peak[0] = max(peak[0], live[0])
+            _t.sleep(0.1)
+            with lock:
+                live[0] -= 1
+        c = Clock()
+        s = Scheduler([Step(f"t{i}", "read", fn=tool) for i in range(9)], Governor({"m": {"rpm": 1}}, clock=c),
+                      Provider(c), kinds=KINDS, clock=c, sleep=c.sleep, max_parallel=3)
+        self.assertTrue(s.run().ok)
+        self.assertEqual(peak[0], 3)
+
+    def test_parked_model_step_does_not_hold_them(self):
+        """m1 이 예산을 다 쓰고 m2 가 세워져도 도구 넷은 바로 함께 돈다(가짜 시계는 0 초에 머문다)."""
+        extra = [Step("m1", "plan", payload="a"), Step("m2", "plan", payload="b")]
+        r, wall, c, p = self.run_tools(extra=extra)
+        self.assertTrue(r.ok)
+        done_at = {x["step"]: x["at_ms"] for x in rows(r, "done")}
+        self.assertEqual([done_at[f"t{i}"] for i in range(4)], [0.0] * 4)
+        self.assertEqual(done_at["m2"], 60000.0)
+        park = rows(r, "park")[0]
+        starts = [x for x in r.ledger if x["kind"] == "start"]
+        self.assertEqual(len(starts), 4)
+        self.assertLess(wall, 2.5 * self.DT)
+
+    def test_model_step_does_not_wait_for_unrelated_tools(self):
+        """도구 넷이 도는 동안 모형 걸음을 보낸다: 모형 응답이 도구보다 먼저 적힌다."""
+        extra = [Step("m1", "plan", payload="a")]
+        r, _, _, _ = self.run_tools(extra=extra, budgets={"m": {"rpm": 10}})
+        kinds = [(x["kind"], x["step"]) for x in r.ledger if x["kind"] in ("done", "start")]
+        self.assertLess(kinds.index(("done", "m1")), min(kinds.index(("done", f"t{i}")) for i in range(4)))
+
+    def test_one_failure_does_not_cancel_the_others(self):
+        import time as _t
+
+        def boom(r):
+            _t.sleep(0.05)
+            raise RuntimeError("x")
+        c = Clock()
+        steps = [Step("bad", "check", fn=boom)] + [Step(f"t{i}", "read", fn=lambda r, i=i: (_t.sleep(0.2), i)[1])
+                                                     for i in range(3)]
+        r = Scheduler(steps, Governor({"m": {"rpm": 1}}, clock=c), Provider(c), kinds=KINDS, clock=c,
+                      sleep=c.sleep).run()
+        self.assertEqual(r.failed, {"bad": "RuntimeError"})
+        self.assertEqual(sorted(r.done), ["t0", "t1", "t2"])
+        order = [x["step"] for x in r.ledger if x["kind"] in ("done", "failed")]
+        self.assertEqual(order[0], "bad")                       # 끝난 차례로 적는다
+
+    def test_per_step_timeout(self):
+        import time as _t
+        c = Clock()
+        steps = [Step("slow", "read", fn=lambda r: _t.sleep(1.0), timeout_s=0.1),
+                 Step("fast", "read", fn=lambda r: (_t.sleep(0.2), "ok")[1])]
+        t0 = _t.monotonic()
+        r = Scheduler(steps, Governor({"m": {"rpm": 1}}, clock=c), Provider(c), kinds=KINDS, clock=c,
+                      sleep=c.sleep).run()
+        self.assertEqual((r.failed, r.done), ({"slow": "timeout"}, {"fast": "ok"}))
+        self.assertLess(_t.monotonic() - t0, 0.8)               # 1 초 걸음을 기다리지 않았다
+        ends = [e for e in r.events if e["type"] == "tool.end"]
+        self.assertTrue(any(e["data"].get("timed_out") for e in ends))
+
+    def test_status_while_running_and_events_per_step(self):
+        import threading
+        gate, seen = threading.Event(), []
+        c = Clock()
+        holder = {}
+
+        def tool(r):
+            gate.wait(2)
+            return 1
+
+        def on_event(row):
+            seen.append((row["kind"], row["step"], holder["s"].status()))
+            if row["kind"] == "start" and row["step"] == "t2":
+                gate.set()
+        s = Scheduler([Step(f"t{i}", "read", fn=tool) for i in range(3)], Governor({"m": {"rpm": 1}}, clock=c),
+                      Provider(c), kinds=KINDS, clock=c, sleep=c.sleep, on_event=on_event)
+        holder["s"] = s
+        r = s.run()
+        self.assertTrue(r.ok)
+        (_, _, st), = [x for x in seen if x[:2] == ("start", "t2")]
+        self.assertEqual((st["running"], st["running_all"], st["next"]), ("t0", ["t0", "t1", "t2"], []))
+        ev = [e["type"] for e in r.events]
+        self.assertEqual((ev.count("tool.start"), ev.count("tool.end")), (3, 3))
+
+    def test_restart_reruns_only_the_running_steps(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d)
+        state = str(d / "s.json")
+        c = Clock()
+        g = Governor({"m": {"rpm": 1}}, clock=c)
+        s = Scheduler([Step("t0", "read", fn=lambda r: 0), Step("t1", "read", fn=lambda r: 1)], g, Provider(c),
+                      kinds=KINDS, clock=c, sleep=c.sleep, state=state)
+        s.state["t0"], s.results["t0"] = "done", 0                # 저장 순간: t0 끝남, t1 도는 중
+        s.state["t1"] = "running"
+        s.save()
+        ran = []
+        s2 = Scheduler([Step("t0", "read", fn=lambda r: ran.append("t0")), Step("t1", "read", fn=lambda r: ran.append("t1"))],
+                       Governor({"m": {"rpm": 1}}, clock=c), Provider(c), kinds=KINDS, clock=c, sleep=c.sleep, state=state)
+        self.assertTrue(s2.run().ok)
+        self.assertEqual(ran, ["t1"])
+
+    def test_max_parallel_is_checked(self):
+        c = Clock()
+        for bad in (0, -1, 2.5):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                Scheduler([], Governor({"m": {"rpm": 1}}, clock=c), Provider(c), kinds=KINDS, max_parallel=bad)
 
 
 class AutonomyGoverned(unittest.TestCase):

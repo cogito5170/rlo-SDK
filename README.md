@@ -219,6 +219,12 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   — 프로세스를 다시 띄워도 끝난 모형 걸음을 다시 부르지 않고, 지킴이 창도 되살아난다. 다시 띄울 때 같은 걸음(id · 이름)을 다시
   싣는다(함수는 저장되지 않는다). `run(wait=False)` 는 자야 할 때 저장하고 돌아온다. `status()` =
   `{resumes_in_s, done, running, parked, next: [{id, kind}]}` 를 감독(ga `ga gemini`)이 그대로 찍는다. `on_event(row)` 는 원장 줄마다 불린다.
+- **함께 도는 도구 걸음(S7)**: 준비된 도구 걸음은 크기가 정해진 스레드 풀(`max_parallel`, 기본 4 · 1 이면 예전처럼 하나씩)에서
+  함께 돈다. 걸음마다 시간 한도(`Step.timeout_s` · `tool_timeout_s`, 실제 초) — 넘으면 그 걸음만 `timeout` 으로 실패하고 다른
+  걸음은 끊지 않는다(파이썬 스레드는 죽일 수 없어 그 스레드는 끝날 때까지 풀 한 칸을 쓴다). 모형 걸음은 도는 도구 걸음을 기다리지
+  않고, 도구 걸음은 세운 모형 걸음을 기다리지 않는다. 결과 · 원장 줄(`start` · `done` · `failed`) · L0 사건은 걸음마다 끝난 차례로
+  적는다. 저장 상태는 도는 걸음을 `running` 으로 남기고 다시 띄우면 그것만 다시 돈다. `status()` 의 `running` 은 차례로 첫째 도는 걸음,
+  `running_all` 은 모두. 도구 함수는 다른 스레드에서 불리므로 공유 상태를 고친다면 스스로 지킨다.
 - **`Autonomy(..., governor=)`**: LLM 을 감싼다. 한 `handle` 의 첫 부름 앞에서 예산이 없거나 429 면 실패하지 않고
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)

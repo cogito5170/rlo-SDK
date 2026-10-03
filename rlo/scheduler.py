@@ -25,9 +25,18 @@ StepKindError(시작하지 않는다). 표는 rlo 의 것이다(action-model/1 �
   다시 돈다(원장 rerun_after_restart).
 - `status()` = {resumes_in_s, done, running, parked, next} -- ga 의 감독(CMD-GA21)이 그대로 찍고 남긴다.
 - `run(wait=False)`: 자야 할 때 자지 않고 저장한 뒤 돌아온다(감독이 기다렸다가 다시 부른다).
+
+함께 도는 도구 걸음(S7, BD-226):
+- 준비된 도구 걸음은 크기가 정해진 풀(max_parallel, 기본 4)에서 함께 돈다. 1 이면 예전처럼 하나씩(같은 스레드에서).
+- 걸음마다 시간 한도(Step.timeout_s, 없으면 tool_timeout_s). 넘으면 그 걸음만 실패(timeout) -- 다른 걸음은 끊지 않는다.
+  파이썬 스레드는 죽일 수 없어 넘은 걸음의 스레드는 끝날 때까지 풀 한 칸을 쓴다(그 결과는 버린다).
+- 모형 걸음은 관계없는 도구 걸음을 기다리지 않고(도구가 도는 동안 보낸다), 도구 걸음은 세운 모형 걸음을 기다리지 않는다.
+- 결과 · 원장 줄 · L0 사건은 걸음마다, 끝난 차례로 이 스레드에서 적는다. 저장 상태는 도는 걸음을 running 으로 남기고,
+  다시 띄우면 그것들만 다시 돈다. status() 의 running 은 차례로 첫째 도는 걸음, running_all 은 모두.
 """
 from __future__ import annotations
 
+import concurrent.futures as cf
 import dataclasses
 import hashlib
 import json
@@ -41,7 +50,7 @@ from .react import LABEL
 
 STEP_KINDS_SCHEMA = "rlo-step-kinds/1"
 KINDS = ("model", "tool")
-DONE, FAILED, SKIPPED, PENDING, PARKED = "done", "failed", "skipped", "pending", "parked"
+DONE, FAILED, SKIPPED, PENDING, PARKED, RUNNING = "done", "failed", "skipped", "pending", "parked", "running"
 TERMINAL = (DONE, FAILED, SKIPPED)
 STATE_SCHEMA = "rlo-scheduler-state/1"
 
@@ -74,6 +83,7 @@ class Step:
     est_tokens: int = 0                        # model: 추정 토큰(입력 + 출력)
     model: "str | None" = None                 # model: 지킴이의 모형 열쇠(없으면 기본)
     not_before: "float | None" = None          # tool: 이 시각(초) 전에는 돌지 않는다
+    timeout_s: "float | None" = None           # tool: 이 걸음의 시간 한도(실제 초). 없으면 Scheduler 의 tool_timeout_s
 
 
 @dataclasses.dataclass
@@ -152,9 +162,13 @@ def _usage(resp):
 class Scheduler:
     def __init__(self, steps, governor: Governor, provider: Callable, *, kinds, clock=None, sleep=None, l0=None,
                  ledger=None, run_id: str = "sched", provider_name: "str | None" = None, usage_format=None,
-                 max_rate_limits: int = 10, grace_s: float = 5.0, state=None, on_event=None):
+                 max_rate_limits: int = 10, grace_s: float = 5.0, state=None, on_event=None, max_parallel: int = 4,
+                 tool_timeout_s: "float | None" = None):
         """kinds: 걸음 표(load_step_kinds 의 꼴 또는 {이름: 종류}). l0: None(메모리) · 경로 · sink. ledger: 경로(JSONL) 또는 None.
-        state: 저장 파일 경로(있으면 읽어 이어 간다). on_event(row): 원장 줄마다(감독이 status() 를 찍는 자리)."""
+        state: 저장 파일 경로(있으면 읽어 이어 간다). on_event(row): 원장 줄마다(감독이 status() 를 찍는 자리).
+        max_parallel: 함께 도는 도구 걸음 수(1 이면 하나씩). tool_timeout_s: 도구 걸음의 기본 시간 한도(실제 초, None 이면 없음)."""
+        if not isinstance(max_parallel, int) or max_parallel < 1:
+            raise ValueError(f"max_parallel: 1 이상의 정수 ({max_parallel!r})")
         table = kinds if isinstance(kinds, (str, os.PathLike)) or (isinstance(kinds, dict) and "schema" in kinds) \
             else {"schema": STEP_KINDS_SCHEMA, "steps": kinds}
         self.kinds = load_step_kinds(table)
@@ -179,6 +193,12 @@ class Scheduler:
         self.attempts, self.rate_limits, self.call_index = {}, {}, {}
         self.sleeps, self.slept, self.calls = 0, 0.0, 0
         self.running = None
+        self.max_parallel, self.tool_timeout_s = max_parallel, tool_timeout_s
+        self.mono = time.monotonic                 # 도구 시간 한도는 실제 시간으로 잰다
+        self._pool = None
+        self._inflight: dict = {}                  # future -> (걸음, tool 맥락, 손잡이, 시작 mono)
+        self._abandoned: set = set()               # 시간 한도를 넘겨 버린 future(스레드가 끝날 때까지 풀 칸을 쓴다)
+        self.waits = 0                             # 도는 도구 걸음을 기다린 횟수(잠과 따로 센다)
         self.state_path, self.on_event = state, on_event
         self._loading = True
         for s in steps:
@@ -253,8 +273,8 @@ class Scheduler:
             self.attempts[sid], self.rate_limits[sid] = st["attempts"], st["rate_limits"]
             if st["call_index"] is not None:
                 self.call_index[sid] = st["call_index"]
-            if st["state"] == DONE and sid not in d["results"]:
-                self._row("rerun_after_restart", self.steps[sid])         # 결과를 저장하지 못했다 -- 다시 돈다
+            if (st["state"] == DONE and sid not in d["results"]) or st["state"] == RUNNING:
+                self._row("rerun_after_restart", self.steps[sid])         # 결과를 저장하지 못했거나 도는 중이었다 -- 다시 돈다
                 continue
             self.state[sid] = st["state"]
             if st["state"] == DONE:
@@ -270,16 +290,18 @@ class Scheduler:
     def status(self) -> dict:
         """{resumes_in_s, done, running, parked, next}. resumes_in_s: 세운 걸음이 있으면 창이 열릴 때까지(초), 기다려도 열리지 않으면
         (하루 할당) None, 세운 걸음이 없으면 None. next: 끝나지 않은 걸음(지금 도는 것 빼고)의 차례 [{id, kind}]."""
-        parked = [sid for sid in self.order if self.state[sid] == PARKED]
+        state = dict(self.state)                   # 도구 스레드에서 불러도 한 순간의 모습으로
+        parked = [sid for sid in self.order if state[sid] == PARKED]
+        running = [sid for sid in self.order if state[sid] == RUNNING or sid == self.running]
         resumes = None
         m = self._next_model()
         if parked and m is not None:
             w = self.gov.wait_s(m.est_tokens, m.model)
             resumes = round(w, 3) if math.isfinite(w) else None
-        return {"resumes_in_s": resumes, "done": [sid for sid in self.order if self.state[sid] == DONE],
-                "running": self.running, "parked": parked,
+        return {"resumes_in_s": resumes, "done": [sid for sid in self.order if state[sid] == DONE],
+                "running": running[0] if running else None, "running_all": running, "parked": parked,
                 "next": [{"id": sid, "kind": self.kinds[self.steps[sid].name]} for sid in self.order
-                         if self.state[sid] not in TERMINAL and sid != self.running]}
+                         if state[sid] not in TERMINAL and sid not in running]}
 
     # ── 돌리기 ──
     def _deps(self, s: Step) -> "str | None":
@@ -303,6 +325,55 @@ class Scheduler:
         self.running = None
         self.state[s.id], self.results[s.id] = DONE, v
         self._row("done", s, step_kind="tool")
+
+    # ── 함께 도는 도구 걸음(S7) ──
+    def _timeout_of(self, s: Step):
+        return s.timeout_s if s.timeout_s is not None else self.tool_timeout_s
+
+    def _busy(self) -> int:
+        self._abandoned = {f for f in self._abandoned if not f.done()}
+        return len(self._inflight) + len(self._abandoned)
+
+    def _start_tool(self, s: Step) -> None:
+        if self._pool is None:
+            self._pool = cf.ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix="rlo-tool")
+        cm = self.rec.tool(s.name, {})
+        h = cm.__enter__()                       # tool.start 를 이 스레드에서
+        self.state[s.id] = RUNNING
+        fut = self._pool.submit(s.fn, self.results)
+        self._inflight[fut] = (s, cm, h, self.mono())
+        self._row("start", s)
+
+    def _end_tool(self, fut, s: Step, cm, h, value=None, error: "str | None" = None, timed_out: bool = False) -> None:
+        h.result(is_error=error is not None, exception=None if timed_out else error, timed_out=timed_out or None)
+        cm.__exit__(None, None, None)            # tool.end
+        if error is None:
+            self.state[s.id], self.results[s.id] = DONE, value
+            self._row("done", s, step_kind="tool")
+        else:
+            self.state[s.id], self.failed[s.id] = FAILED, error
+            self._row("failed", s, exception=error)
+
+    def _collect(self) -> bool:
+        """끝난 도구 걸음을 끝난 차례로 적는다. 시간 한도를 넘은 것은 실패로 적고 버린다. 무언가 적었으면 True."""
+        moved = False
+        for fut in [f for f in self._inflight if f.done()]:
+            s, cm, h, _ = self._inflight.pop(fut)
+            e = fut.exception()
+            if e is None:
+                self._end_tool(fut, s, cm, h, value=fut.result())
+            else:
+                self._end_tool(fut, s, cm, h, error=type(e).__name__)
+            moved = True
+        now = self.mono()
+        for fut, (s, cm, h, t0) in list(self._inflight.items()):
+            limit = self._timeout_of(s)
+            if limit is not None and now - t0 >= limit:
+                self._inflight.pop(fut)
+                self._abandoned.add(fut)
+                self._end_tool(fut, s, cm, h, error="timeout", timed_out=True)
+                moved = True
+        return moved
 
     def _park(self, s: Step, wait_s: float, why: str) -> None:
         if self.state[s.id] == PARKED and why == "budget":
@@ -377,11 +448,18 @@ class Scheduler:
                                                                       if self.state[a] in (FAILED, SKIPPED))
                     self._row("skipped", s, after=self.skipped[sid])
                     progressed = True
-            for sid in list(self.order):         # 도구 걸음: 준비됐으면 언제나
+            if self._inflight and self._collect():
+                progressed = True
+            for sid in list(self.order):         # 도구 걸음: 준비됐으면 언제나(풀에 자리가 있는 만큼)
                 s = self.steps[sid]
                 if self.kinds[s.name] == "tool" and self.state[sid] == PENDING and self._deps(s) == "ok" \
                         and (s.not_before is None or s.not_before <= self.clock()):
-                    self._run_tool(s)
+                    if self.max_parallel == 1:
+                        self._run_tool(s)
+                    elif self._busy() < self.max_parallel:
+                        self._start_tool(s)
+                    else:
+                        continue
                     progressed = True
             m = self._next_model()
             if m is not None:
@@ -391,7 +469,7 @@ class Scheduler:
                     progressed = True
                 else:
                     self._park(m, g.wait_s, "budget")
-            if all(st in TERMINAL for st in self.state.values()):
+            if all(st in TERMINAL for st in self.state.values()) and not self._inflight:
                 break
             if progressed:
                 continue
@@ -404,6 +482,14 @@ class Scheduler:
                 if math.isfinite(w):
                     wake.append(now + w)
             wake = [t for t in wake if t > now]
+            if self._inflight:                   # 도는 도구 걸음이 있다 -- 하나가 끝나거나 · 시간 한도 · 창 가운데 이른 때까지
+                limits = [t0 + self._timeout_of(s) - self.mono() for s, _, _, t0 in self._inflight.values()
+                          if self._timeout_of(s) is not None]
+                cands = [x for x in [min(wake) - now if wake else None, *limits] if x is not None]
+                cf.wait(list(self._inflight), timeout=max(0.0, min(cands)) if cands else None,
+                        return_when=cf.FIRST_COMPLETED)
+                self.waits += 1
+                continue
             if not wake:
                 break                            # 기다려도 바뀌지 않는다(하루 할당 · 풀 수 없는 앞 걸음) -- 세운 채로 끝낸다
             if not wait:
@@ -413,6 +499,9 @@ class Scheduler:
             d = min(wake) - now
             self.sleep(d)
             self.sleeps, self.slept = self.sleeps + 1, self.slept + d
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
         parked = [sid for sid in self.order if self.state[sid] not in TERMINAL]
         return Report(dict(self.results), dict(self.failed), dict(self.skipped), parked, self.sleeps,
                       round(self.slept, 6), self.calls, list(self.rows), list(self._mem.events) if self._mem else [],
