@@ -323,7 +323,9 @@ phase, state, t0 = sys.argv[1], sys.argv[2], float(sys.argv[3])
 class Clock:
     t = t0
     def __call__(self): return self.t
-    def sleep(self, d): self.t += d
+    def sleep(self, d):
+        assert d > 0, d
+        self.t += d
 c = Clock()
 calls = []
 def provider(p):

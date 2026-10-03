@@ -1,6 +1,6 @@
 """변이 시험 -- 지켜야 할 것을 하나씩 깨뜨린 사본에서 시험 전체를 돌려, 모두 빨개지는지(RED) 본다.
 
-    python -B eval/mutation.py          (rlo-sdk 의 의존이 깔린 환경에서. rlo 자신은 깔려 있지 않아도 된다)
+    python -B eval/mutation.py [이름 조각 …]   (rlo-sdk 의 의존이 깔린 환경에서. 조각을 주면 이름에 그것이 든 변이만)
 
 사본마다 저장소를 임시 디렉터리에 베끼고, 그 안에서 `python -B -m unittest discover` 를 돈다(낡은 .pyc 를 쓰지 않게 -B).
 """
@@ -195,9 +195,15 @@ MUTANTS = [
 ]
 
 
+TIMEOUT_S = 600     # 변이 하나의 시험이 이보다 오래 걸리면 RED(멈추지 않는 고리 -- 예: 바쁘게 다시 묻기)로 센다
+
+
 def run(tree: pathlib.Path) -> int:
-    return subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-t", "."], cwd=tree,
-                          capture_output=True, text=True).returncode
+    try:
+        return subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-t", "."], cwd=tree,
+                              capture_output=True, text=True, timeout=TIMEOUT_S).returncode
+    except subprocess.TimeoutExpired:
+        return 124
 
 
 def copy() -> pathlib.Path:
@@ -216,8 +222,10 @@ def main() -> int:
             return 2
     finally:
         shutil.rmtree(base)
+    only = sys.argv[1:]                                  # 이름에 이 글자가 든 변이만(없으면 모두)
+    chosen = [(n, e) for n, e in MUTANTS if not only or any(o in n for o in only)]
     red = 0
-    for name, edits in MUTANTS:
+    for name, edits in chosen:
         d = copy()
         try:
             for f, old, new in edits:
@@ -230,9 +238,9 @@ def main() -> int:
         finally:
             shutil.rmtree(d)
         red += rc != 0
-        print(f"{'RED  ' if rc else 'GREEN'} {name}")
-    print(f"{red}/{len(MUTANTS)} RED")
-    return 0 if red == len(MUTANTS) else 1
+        print(f"{'RED  ' if rc else 'GREEN'} {name}" + ("  (시간 초과)" if rc == 124 else ""), flush=True)
+    print(f"{red}/{len(chosen)} RED")
+    return 0 if red == len(chosen) else 1
 
 
 if __name__ == "__main__":
