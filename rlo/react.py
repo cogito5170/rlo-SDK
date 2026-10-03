@@ -14,11 +14,19 @@
 대안은 허가를 넓히지 않는다: grants 는 읽기만 하고, use_tool 은 모형에 있고 허가가 필요하면 허가된 도구만 이름 짓는다.
 대체표(substitutes)는 운영자가 모형 파일에 둔다 -- action-model/1 의 칸이 아니라 rlo 가 그 옆에서 읽고 떼어 낸다
 (`split_model`). action-model/1 계약(BD-109)은 그대로다.
+
+통로 도구(channels, CMD-K13): 운영자가 모형 파일에 둔다(substitutes 와 같은 자리). 인자가 **고정된** 통로 호출만 --
+    {"tool": "mcp__github__add_issue_comment", "args": {"owner": "o", "repo": "r", "issue_number": 1}}       인자 값이 같아야
+    {"tool": "Bash", "argv_prefix": ["ga", "mail"]}             명령이 그 낱말들로 시작하고 셸 특수 문자가 없어야
+    "use": "report"(기본) | "read"                               올림에 쓰는 통로인가 · 읽기만 하는 통로인가
+D 의 까닭이 낡음뿐이면 고정된 통로 호출은 지나간다(hooks, allowed_while_stale). 올리는(report) 대안은 지금 부를 수 있는
+통로 도구를 이름 짓는다 -- 모형에 있고, 허가가 필요하면 허가됐고, D 가 막지 않는 것만(막힌 도구를 가리키지 않는다).
 """
 from __future__ import annotations
 
 import json
 import re
+import shlex
 
 MAX_ATTEMPTS = 2
 PREFIX = "-- react: "
@@ -44,12 +52,86 @@ class SubstitutesError(ValueError):
     pass
 
 
+EXTENSIONS = ("substitutes", "channels")              # rlo 가 모형 파일에서 읽고 떼어 내는 칸(action-model/1 밖)
+SHELL_META = re.compile(r"[;&|<>$`\\(){}\n\r*?!~]")     # 고정된 Bash 통로에 있으면 안 되는 글자(이어 붙이기 · 대체 · 글롭)
+
+
+def channels_of(d: dict) -> list:
+    """모형 JSON 의 channels -> [{tool, args | argv_prefix, use}]. 고정이 없거나 꼴이 틀리면 SubstitutesError."""
+    chans = d.get("channels", []) if isinstance(d, dict) else []
+    if not isinstance(chans, list):
+        raise SubstitutesError("channels: 목록이어야 한다")
+    out = []
+    for c in chans:
+        if not isinstance(c, dict) or set(c) - {"tool", "args", "argv_prefix", "use"} or \
+                not (isinstance(c.get("tool"), str) and LABEL.match(c["tool"])):
+            raise SubstitutesError(f"channels: {{tool, args | argv_prefix, use}} 이어야 한다 ({c!r})")
+        use = c.get("use", "report")
+        if use not in ("report", "read"):
+            raise SubstitutesError(f"channels: use 는 report · read ({use!r})")
+        args, prefix = c.get("args"), c.get("argv_prefix")
+        if (args is None) == (prefix is None):
+            raise SubstitutesError(f"channels {c['tool']}: args 나 argv_prefix 가운데 하나로 고정해야 한다")
+        if args is not None and not (isinstance(args, dict) and args and all(
+                isinstance(k, str) and isinstance(v, (str, int, bool)) for k, v in args.items())):
+            raise SubstitutesError(f"channels {c['tool']}: args 는 비지 않은 {{이름: 스칼라}}")
+        if prefix is not None and not (isinstance(prefix, list) and prefix and all(
+                isinstance(x, str) and x and not SHELL_META.search(x) and " " not in x for x in prefix)):
+            raise SubstitutesError(f"channels {c['tool']}: argv_prefix 는 비지 않은 낱말 목록")
+        out.append({"tool": c["tool"], "args": dict(args) if args else None,
+                    "argv_prefix": list(prefix) if prefix else None, "use": use})
+    return out
+
+
+def channel_of(tool: str, tool_input, channels) -> "dict | None":
+    """이 호출이 고정된 통로 호출인가. 맞는 통로(dict) 또는 None."""
+    if not isinstance(tool_input, dict):
+        return None
+    for c in channels or ():
+        if c["tool"] != tool:
+            continue
+        if c["args"] is not None and all(k in tool_input and tool_input[k] == v and type(tool_input[k]) is type(v)
+                                         for k, v in c["args"].items()):
+            return c
+        if c["argv_prefix"] is not None:
+            cmd = tool_input.get("command")
+            if not isinstance(cmd, str) or SHELL_META.search(cmd):
+                continue
+            try:
+                argv = shlex.split(cmd)
+            except ValueError:
+                continue
+            if argv[:len(c["argv_prefix"])] == c["argv_prefix"]:
+                return c
+    return None
+
+
+def report_channel(gmodel, channels, dcv=None, stale_only_d: bool = False) -> "str | None":
+    """올릴 때 이름 지을 통로 도구: use=report, 모형에 있고, 허가가 필요하면 허가됐고, D 가 막지 않는 것(차례대로 첫째)."""
+    from guard.rules import GRANT_RISKS
+    if gmodel is None:
+        return None
+    for c in channels or ():
+        spec = gmodel.specs.get(c["tool"])
+        if c["use"] != "report" or spec is None:
+            continue
+        if spec.risk in GRANT_RISKS and c["tool"] not in gmodel.grants:
+            continue
+        if spec.risk in gmodel.risky and dcv is not None and not dcv.complete and not stale_only_d:
+            continue                                     # 상태를 모르면(UNKNOWN) D 가 이 통로도 막는다
+        return c["tool"]
+    return None
+
+
 def split_model(d: dict) -> "tuple[dict, dict]":
-    """모형 JSON -> (action-model/1 dict, substitutes {도구: [도구, …]}). substitutes 가 없으면 {}.
-    꼴이 틀리면 SubstitutesError(설정 오류 -- 명령 훅은 enforce 에서 닫는다)."""
-    if not isinstance(d, dict) or "substitutes" not in d:
+    """모형 JSON -> (action-model/1 dict, substitutes {도구: [도구, …]}). rlo 의 칸(substitutes · channels)은 떼어 낸다.
+    substitutes 가 없으면 {}. 꼴이 틀리면 SubstitutesError(설정 오류 -- 명령 훅은 enforce 에서 닫는다)."""
+    if not isinstance(d, dict) or not set(EXTENSIONS) & set(d):
         return d, {}
-    rest = {k: v for k, v in d.items() if k != "substitutes"}
+    channels_of(d)                                       # 꼴 검사
+    rest = {k: v for k, v in d.items() if k not in EXTENSIONS}
+    if "substitutes" not in d:
+        return rest, {}
     subs = d["substitutes"]
     if not isinstance(subs, dict) or not all(
             isinstance(k, str) and LABEL.match(k) and isinstance(v, list) and all(isinstance(x, str) and LABEL.match(x) for x in v)
@@ -59,11 +141,18 @@ def split_model(d: dict) -> "tuple[dict, dict]":
 
 
 def load_model(path: str):
-    """(ActionModel, substitutes). 모형 파일에 substitutes 가 있으면 떼어 내고 나머지를 action-model/1 로 읽는다."""
+    """(ActionModel, substitutes). 모형 파일의 rlo 칸(substitutes · channels)을 떼어 내고 나머지를 action-model/1 로 읽는다."""
+    model, subs, _ = load_hook_model(path)
+    return model, subs
+
+
+def load_hook_model(path: str):
+    """(ActionModel, substitutes, channels)."""
     from action.spec import ActionModel
     with open(path, encoding="utf-8") as f:
-        d, subs = split_model(json.load(f))
-    return ActionModel.from_dict(d), subs
+        raw = json.load(f)
+    d, subs = split_model(raw)
+    return ActionModel.from_dict(d), subs, channels_of(raw)
 
 
 def eligible(tool: str, gmodel, substitutes: dict) -> list:

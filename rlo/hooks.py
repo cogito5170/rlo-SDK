@@ -32,6 +32,10 @@
 - **거부마다 닫힌 대안 하나**(CMD-K11, `rlo/react.py`). 까닭의 마지막 줄은 `-- react: {json}`(kind · rule · cause ·
   tool · attempt · of · escalate), 기록 줄에도 같은 객체. 같은 (도구, 규칙, 원인) 거부의 세 번째는 report · escalate.
   shadow 는 기록만 한다. 대안은 허가를 넓히지 않는다.
+- **D 는 세션을 통로에서 끊지 않는다**(CMD-K13). D 의 까닭이 낡음뿐이면 모형 파일에 선언된, 인자가 고정된 통로 호출
+  (channels: 통로 이슈의 add_issue_comment · issue_read, `ga mail` Bash, send_message)은 지나간다(기록 allowed_while_stale).
+  다른 external 호출은 D 그대로. 상태를 모르면(UNKNOWN · 없음) 통로도 막힌다. report 대안은 지금 부를 수 있는 통로 도구를
+  이름 짓는다. 낡음은 판정마다 transcript 전체를 다시 거둬 정한다 -- 더 새 도구 결과가 있으면 모형이 아무것도 하지 않아도 풀린다.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
@@ -112,7 +116,7 @@ class TranscriptJudge:
     """
 
     def __init__(self, model, *, grants=(), risky=None, purpose=PURPOSE, capabilities=None, sensor_config=None,
-                 clock=None, policy: str = POLICY, substitutes=None):
+                 clock=None, policy: str = POLICY, substitutes=None, channels=None):
         from guard import GuardModel
         from guard.views import DEFAULT_RISKY
         try:
@@ -124,6 +128,7 @@ class TranscriptJudge:
         self.sensor_config = sensor_config
         self.clock = clock or (lambda: time.time() * 1000)
         self.substitutes = {k: list(v) for k, v in (substitutes or {}).items()}
+        self.channels = list(channels or [])             # CMD-K13: rlo.react.channels_of 의 꼴
 
     def collect(self, input_data: dict, *, exclude_current: bool = False):
         """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState). exclude_current 면 지금 호출을 뺀다(PreToolUse)."""
@@ -174,26 +179,36 @@ class HookAdapter:
         self.observe = observe or (lambda d: None)
         self.collected = collected or (lambda ev, run, rs: None)
 
-    def react_for(self, input_data: dict, rule: str, cause: str, tool=None) -> dict:
-        """닫힌 대안(CMD-K11). 되풀이는 transcript 의 같은 거부로 센다 -- 읽지 못하면 첫 번째로 본다."""
+    def react_for(self, input_data: dict, rule: str, cause: str, tool=None, dcv=None, stale=False) -> dict:
+        """닫힌 대안(CMD-K11). 되풀이는 transcript 의 같은 거부로 센다 -- 읽지 못하면 첫 번째로 본다.
+        report 면 지금 부를 수 있는 통로 도구를 이름 짓는다(CMD-K13 S3) -- 없으면 이름 짓지 않는다."""
         try:
             prior = R.prior_denies(input_data["transcript_path"], input_data["tool_name"], rule, cause)
         except Exception:
             prior = 0
-        return R.react(rule, cause, tool, prior)
+        obj = R.react(rule, cause, tool, prior)
+        if obj["kind"] == "report":
+            ch = R.report_channel(getattr(self.judge, "gmodel", None), getattr(self.judge, "channels", None), dcv, stale)
+            if ch is not None:
+                obj["tool"] = ch
+        return obj
 
     def pre_tool_use(self, input_data: dict) -> dict:
         try:
             it, v, res, dcv = self.judge(input_data, self.mode)
-            obj = None
-            if res.verdict != "ALLOW":
-                rule, cause, tool = R.classify(it, res, dcv, getattr(self.judge, "gmodel", None),
-                                               getattr(self.judge, "substitutes", None))
-                obj = self.react_for(input_data, rule, cause, tool)
             row = {"tool_use_id": input_data.get("tool_use_id"), "tool_name": it.action,
                    "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
                    "dc_id": dcv.dc_id, "complete": dcv.complete,
                    "missing_required": list(dcv.missing_required), "result": res.to_dict()}
+            obj, stale = None, res.verdict != "ALLOW" and stale_only(res, dcv)
+            ch = R.channel_of(it.action, it.args, getattr(self.judge, "channels", None)) if stale else None
+            if ch is not None:                       # CMD-K13 S1: 낡음뿐인 D 는 고정된 통로 호출을 막지 않는다
+                self.record("guard", dict(row, allowed_while_stale=f"channel:{ch['tool']}"))
+                return {}
+            if res.verdict != "ALLOW":
+                rule, cause, tool = R.classify(it, res, dcv, getattr(self.judge, "gmodel", None),
+                                               getattr(self.judge, "substitutes", None))
+                obj = self.react_for(input_data, rule, cause, tool, dcv, stale)
             self.record("guard", dict(row, react=obj) if obj else row)
             if self.mode == ENFORCE and res.verdict != "ALLOW":
                 hint = STALE_HINT if stale_only(res, dcv) else ""                 # 자르기 뒤에 붙인다 -- 잘리지 않게
@@ -304,14 +319,14 @@ def _recorder(path):
 
 
 def _adapter_from_args(a, record=None) -> HookAdapter:
-    model, substitutes = R.load_model(a.model)         # substitutes 는 모형 파일 옆 칸(action-model/1 밖, CMD-K11)
+    model, substitutes, channels = R.load_hook_model(a.model)   # 모형 파일 옆 칸(action-model/1 밖, CMD-K11 · K13)
     cfg = None
     if a.stall_threshold is not None:
         from llmsensor.state import DEFAULT_CONFIG
         cfg = DEFAULT_CONFIG.with_(stall_repeat_threshold=a.stall_threshold)
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
-                       clock=clock, substitutes=substitutes)
+                       clock=clock, substitutes=substitutes, channels=channels)
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:

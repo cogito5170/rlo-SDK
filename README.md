@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.7.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.8.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -130,6 +130,30 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   refresh it, then retry`. 읽기 도구(Read · Grep, 위험 등급 read)는 D 밖이라 지나고, 그 결과가 상태를 새로 관측한다 —
   그 뒤 같은 호출은 지난다(시험 `StaleHint`). 판정은 deny 그대로이고, 상태를 지어내거나 시계를 바꾸지 않는다.
   나란히 부른 호출처럼 상태를 **모르는**(UNKNOWN) D 에는 붙지 않는다.
+
+### D 는 세션을 통로에서 끊지 않는다 (CMD-K13)
+
+막힌 세션이 올릴 길(통로)까지 D 가 막으면 아무도 모른다. 그래서 운영자가 모형 파일에 **인자가 고정된 통로 도구**를 선언한다
+(`substitutes` 와 같은 자리 — action-model/1 밖, rlo 가 읽고 떼어 낸다):
+
+```json
+"channels": [
+  {"tool": "mcp__github__add_issue_comment", "args": {"owner": "cogito5170", "repo": "amp", "issue_number": 1}},
+  {"tool": "mcp__github__issue_read", "args": {"owner": "cogito5170", "repo": "amp", "issue_number": 1}, "use": "read"},
+  {"tool": "Bash", "argv_prefix": ["ga", "mail"]}
+]
+```
+
+- **D 의 까닭이 낡음뿐이면**(쓸 수 없는 필수 키가 모두 STALE, 걸린 규칙이 D 뿐) 고정된 통로 호출은 지나간다. 기록 줄은 판정(D)을
+  그대로 싣고 `allowed_while_stale: "channel:<도구>"` 를 붙인다. 다른 external 호출은 D 그대로다.
+- 고정: `args` 는 값과 타입이 같아야 한다(다른 이슈 · 저장소 · `"1"` 대 `1` 은 통로가 아니다). Bash 는 명령이 `argv_prefix`
+  낱말로 시작하고 셸 특수 문자(`; & | < > $ \` ( ) { } * ? ! ~`, 줄바꿈)가 없어야 한다. 고정이 없는 선언은 설정 오류다(enforce 에서 막는다).
+- 상태를 **모르면**(나란히 부른 앞 호출의 결과가 없음 등 UNKNOWN) 통로도 막힌다 — 낡음이 아니다.
+- `report` 대안은 지금 부를 수 있는 통로 도구를 이름 짓는다(`use: report`, 모형에 있고, 허가가 필요하면 허가됐고, D 가 막지 않는 것).
+  그런 것이 없으면 이름 짓지 않는다 — 막힌 도구를 가리키지 않는다.
+- **낡음은 스스로 풀린다**: 판정마다 transcript 전체를 다시 거두므로, 더 새 도구 결과(읽기 하나)가 있으면 모형이 따로 하지 않아도
+  지나간다. Claude Code 는 막힌 호출에도 `tool_result`(is_error, 까닭)를 남기는데, 그것도 더 새 도구 결과라서 낡음 D 는 한 번
+  막은 뒤 다음 호출에서 풀린다. 사용자 · 모형의 글만 새로 있는 것은 Sensor 의 `execution_health`(도구 결과로 선다)를 새로 하지 않는다.
 
 ### 거부마다 대안 하나 — 턴 안 ReAct (CMD-K11, `rlo/react.py`)
 
