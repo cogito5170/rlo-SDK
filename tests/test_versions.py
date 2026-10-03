@@ -98,7 +98,7 @@ class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
         self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
-        self.assertEqual(rlo.__version__, "0.5.0")
+        self.assertEqual(rlo.__version__, "0.5.1")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다
@@ -124,6 +124,7 @@ class Manifest(unittest.TestCase):
         except metadata.PackageNotFoundError:
             self.skipTest("rlo-sdk 가 깔려 있지 않다(소스에서 돎)")
         self.assertEqual(_manifest_mismatch(reqs), [])
+        self.assertEqual(metadata.version("rlo-sdk"), rlo.__version__)       # 깔린 판 = versions() 의 판(pyproject 가 옆에 없어도)
 
     def test_builder_spellings_compare_by_meaning(self):
         """ga 쪽 빌드의 꼴(`이름@ git+…`)도 같은 목록이다. sha · 이름 · extras 가 다르면 여전히 다르다(CMD-K9)."""

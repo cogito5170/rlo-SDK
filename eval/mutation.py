@@ -91,7 +91,7 @@ MUTANTS = [
     ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
     ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
     ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
-    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.5.0"', '__version__ = "0.5.1"')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.5.1"', '__version__ = "0.5.2"')]),
     # 꼴이 틀린 입력(CMD-K10 S1)
     ("hooks: 꼴이 틀린 입력을 enforce 에서도 허락", [("rlo/hooks.py",
         'return deny(f"rlo hook input error: {problem}") if self.mode == ENFORCE else {}',
