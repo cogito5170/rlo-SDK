@@ -134,7 +134,7 @@ def suggest_new_fields(record_tools: dict[str, set[str]], model_tools: dict[str,
                         "name": field_name,
                         "type": infer_field_type(field_name),
                         "required": True,  # 기본값 -- 사람이 검토
-                        "note": "[DRAFT] 기록에서 �은 새 칸"
+                        "note": "[DRAFT] 기록에서 찾은 새 칸"
                     }
                     for field_name in sorted(new_fields)
                 ]

@@ -24,7 +24,7 @@ dependencies = [
 sensor = ["llmsensor @ git+https://github.com/cogito5170/Sensor@97961e98e6e55b87ea1bbb8483bb99269e5e3900"]
 
 [tool.setuptools]
-packages = ["rlo"]
+packages = ["rlo", "rlo.suggest_model"]
 
 [tool.setuptools.package-data]
 rlo = ["data/*.json", "data/transcripts/*.jsonl", "data/transcripts/*.json"]
