@@ -2,9 +2,9 @@
 import json
 import tempfile
 import unittest
-from pathlib import Path
 
 from rlo import parallel_calls
+from rlo.example_hooks import data
 
 
 class CountParallelCalls(unittest.TestCase):
@@ -251,9 +251,7 @@ class IntegrationWithTestData(unittest.TestCase):
 
     def test_parallel_jsonl(self):
         """parallel.jsonl 은 한 응답에 2개 tool_use 를 가져야 한다."""
-        test_data_path = Path(__file__).parent.parent / "rlo" / "data" / "transcripts" / "parallel.jsonl"
-        if not test_data_path.exists():
-            self.skipTest(f"Test data not found: {test_data_path}")
+        test_data_path = data("transcripts/parallel.jsonl")          # 패키지 자원 -- 설치본에서도 건너뛰지 않는다(CMD-K9)
 
         result = parallel_calls.count_parallel_calls(str(test_data_path))
 
@@ -265,9 +263,7 @@ class IntegrationWithTestData(unittest.TestCase):
 
     def test_normal_jsonl(self):
         """normal.jsonl 은 응답별로 각각 1개 tool_use 를 가져야 한다."""
-        test_data_path = Path(__file__).parent.parent / "rlo" / "data" / "transcripts" / "normal.jsonl"
-        if not test_data_path.exists():
-            self.skipTest(f"Test data not found: {test_data_path}")
+        test_data_path = data("transcripts/normal.jsonl")          # 패키지 자원 -- 설치본에서도 건너뛰지 않는다(CMD-K9)
 
         result = parallel_calls.count_parallel_calls(str(test_data_path))
 

@@ -8,12 +8,14 @@ CMD-WA1 에서 요구한 기능:
 """
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
 
+import rlo
 from rlo.suggest_model import (
     collect_tools_and_fields,
     get_model_tools,
@@ -211,6 +213,8 @@ class SuggestNewFields(unittest.TestCase):
         for field in fields:
             self.assertIn("note", field)
             self.assertIn("DRAFT", field["note"])
+            # 이전 호출에 없던 칸 -- 선택으로 초안한다(CMD-K9)
+            self.assertIs(field["required"], False)
 
     def test_no_new_fields(self):
         """새 칸이 없으면 그 도구는 목록에 없다."""
@@ -267,8 +271,10 @@ class SuggestModelCommand(unittest.TestCase):
             # NewTool 의 초안이 있어야 한다
             self.assertTrue(any(s["name"] == "NewTool" for s in result["new_specs"]))
 
-            # Bash 의 새 칸이 있어야 한다
-            self.assertIn("Bash", result["new_fields"])
+            # Bash 의 새 칸이 있어야 한다 -- 기록에서 잰 칸만, 선택 · 초안 표시로(CMD-K8 · K9)
+            self.assertEqual(result["new_fields"]["Bash"],
+                             [{"name": "new_bash_field", "type": "string", "required": False,
+                               "note": "[DRAFT] 기록에서 찾은 새 칸"}])
 
     def test_subprocess_invocation(self):
         """python -m rlo.suggest_model 로 실행할 수 있다."""
@@ -287,7 +293,9 @@ class SuggestModelCommand(unittest.TestCase):
                 [sys.executable, "-m", "rlo.suggest_model", "--model", model_path, "--record", f.name],
                 capture_output=True,
                 text=True,
-                cwd=str(pathlib.Path(__file__).parent.parent)
+                cwd=tempfile.gettempdir(),  # 소스 트리가 아닌 곳에서, 이 시험이 import 한 그 rlo(설치본 · 소스)를 부른다
+                env=dict(os.environ, PYTHONPATH=os.pathsep.join(
+                    [str(pathlib.Path(rlo.__file__).resolve().parent.parent), os.environ.get("PYTHONPATH", "")])),
             )
 
             self.assertEqual(p.returncode, 0, f"stderr: {p.stderr}")

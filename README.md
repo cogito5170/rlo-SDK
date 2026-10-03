@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.4.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.5.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -66,7 +66,7 @@ SDK 판본은 semver 이고, 지금은 `0.x` 다. 계약이 호환되지 않게 
 
 ### 고정 목록
 
-원본은 [`rlo/_pins.py`](rlo/_pins.py) 이고, `pyproject.toml` 이 글자까지 같아야 한다(시험). 깔린 고정 배포가 서로를 요구하는 글자도 이 목록과 같아야 한다(`PinGraph` 시험 — 다르면 pip 가 `ResolutionImpossible`).
+원본은 [`rlo/_pins.py`](rlo/_pins.py) 이고, `pyproject.toml` 이 글자까지 같아야 한다(시험). 깔린 메타데이터와 깔린 고정 배포가 서로를 요구하는 것도 이 목록과 같아야 한다(`Manifest` · `PinGraph` 시험 — 다르면 pip 가 `ResolutionImpossible`). 메타데이터는 빌드 도구마다 글자가 달라(`action-contract @ git+…` · `action-contract@ git+…`) **뜻으로** 비교한다: 이름(PEP 503) · extras · url(sha 포함) · 표지.
 
 MS 의 sha 없는 `ms[sensor]` extras 는 `rlo-sdk[sensor]` 와 함께 깔면 설치가 실패했다(잰 것, K2) → MS 가 뺐다(M27).
 
@@ -136,6 +136,23 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
 
 실패 뒤에 막고 싶으면 운영자가 행동 명세의 사전조건(A6)으로 둔다(BD-123). `execution_control` 을 꽂으면 Claude Code
 transcript 로는 완전해질 수 없어 위험 도구가 늘 D 다.
+
+## 기록을 읽는 도구 둘
+
+둘 다 읽기만 한다. 결과는 JSON 으로 표준 출력에 낸다.
+
+**`python -m rlo.suggest_model --model <action-model/1 JSON> --record <훅 기록 JSONL>`** — 훅의 `--record` 기록(guard 줄의 `tool_input_keys`, 칸 이름만)에서 모형에 없는 것을 찾아 **초안**을 낸다. 모형은 바꾸지 않는다.
+
+- `new_specs`: 모형에 없는 도구마다 action-spec 초안 하나. `risk` 는 `null`(사람이 정한다), 설명은 `[DRAFT] …`.
+- `new_fields`: 모형에 있는 도구에 기록에서 처음 본 칸. `required: false`(이전 호출에 없던 칸이라 선택일 가능성이 크다), `note: "[DRAFT] 기록에서 찾은 새 칸"`.
+- 기록에서 잰 칸만 넣는다. 칸 타입은 이름으로 추측한다(`*_ms` · `timeout` · `duration` → number, `is_*` · `*_flag` · `*_enabled` → bool, 나머지 string) — 기록에 값이 없기 때문이다.
+
+```
+python -m rlo.hooks --model m.json --mode shadow --record rec.jsonl …     # 훅이 기록을 남기고
+python -m rlo.suggest_model --model m.json --record rec.jsonl > draft.json  # 사람이 draft.json 을 보고 모형에 옮긴다
+```
+
+**`python -m rlo.parallel_calls <transcript.jsonl> [<transcript.jsonl> …]`** — Claude Code transcript 에서 한 응답(`message.id`)이 부른 `tool_use` 수를 센다. 파일마다 `responses`(`message_id` · `tool_count` · `tools`) 와 `summary`(`total_responses` · `parallel_responses`(2 개 이상) · `max_tool_count`). 나란히 부른 호출은 훅이 앞 호출을 기다리는 중으로 보아 `agent.execution_health` 를 모름 → D 로 막을 수 있으니(위 판정 표의 parallel), 실제 작업에서 얼마나 잦은지 잴 때 쓴다.
 
 ## MBA-frontend 와 함께 쓰기
 

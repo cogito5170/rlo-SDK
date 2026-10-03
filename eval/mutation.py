@@ -89,7 +89,22 @@ MUTANTS = [
     ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
     ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
     ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
-    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.4.1"', '__version__ = "0.4.2"')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.5.0"', '__version__ = "0.5.1"')]),
+    # 기록을 읽는 도구(CMD-K9)
+    ("suggest-model: 새 칸을 필수로 초안", [("rlo/suggest_model/__init__.py", '"required": False,  # 이전 호출에 없던 칸', '"required": True,  # 이전 호출에 없던 칸')]),
+    ("suggest-model: 새 칸에 초안 표시 없음", [("rlo/suggest_model/__init__.py", '"note": "[DRAFT] 기록에서 찾은 새 칸"', '"note": "기록에서 찾은 새 칸"')]),
+    ("suggest-model: 기록에 없는 칸도 넣음", [("rlo/suggest_model/__init__.py", "            new_fields = record_fields - model_fields\n",
+                                          "            new_fields = (record_fields | {\"timeout\"}) - model_fields\n")]),
+    # 시험 도구 자신(CMD-K9): 뜻 비교가 빌드 꼴을 받아들이되 sha 는 여전히 본다
+    ("시험: 요구를 글자 그대로 비교(K9 전)", [("tests/test_versions.py",
+        "    return (_canon(r.name), tuple(sorted(_canon(x) for x in r.extras)), str(r.specifier), r.url, marker)",
+        "    return (s.split(\";\")[0].strip(), (), \"\", s.split(\";\")[0].strip(), marker)")]),
+    ("시험: 비교가 sha 를 버림", [("tests/test_versions.py",
+        "    return (_canon(r.name), tuple(sorted(_canon(x) for x in r.extras)), str(r.specifier), r.url, marker)",
+        "    return (_canon(r.name), tuple(sorted(_canon(x) for x in r.extras)), str(r.specifier), r.url.rsplit(\"@\", 1)[0], marker)")]),
+    ("시험: packaging 없을 때의 비교가 sha 를 버림", [("tests/test_versions.py",
+        "    return (_canon(name), extras, \"\", url.strip() if at else None, marker)",
+        "    return (_canon(name), extras, \"\", url.strip().rsplit(\"@\", 1)[0] if at else None, marker)")]),
     # 예제
     ("examples: 설정 예가 enforce", [("examples/claude_code_settings.json", "--mode shadow --grant Bash", "--mode enforce --grant Bash")]),
     ("examples: Agent SDK 예가 SessionEnd 를 검", [("examples/agent_sdk.py", '"PostToolUseFailure", "Stop")', '"PostToolUseFailure", "Stop", "SessionEnd")')]),

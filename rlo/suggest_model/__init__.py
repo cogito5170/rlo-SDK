@@ -6,6 +6,7 @@
 출력: 모형에 없는 도구마다 초안 spec 하나, 모형에 있는 도구의 새 칸 목록을 JSON 으로 낸다.
   - 칸 타입은 추측이다 -- 기록에는 값이 없으므로("tool_input_keys" 는 이름만)
   - 위험 등급(risk)은 자동으로 정하지 않는다 -- 사람이 검토해 채운다
+  - 모형에 있는 도구의 새 칸은 `required: false` 로 초안한다 -- 이전 호출에 없던 칸이라 선택일 가능성이 크다(CMD-K9)
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ class FieldDraft:
     """필드 초안 -- 기록에서 본 이름만 있고 타입은 추측."""
     name: str
     type: str = "string"  # 기본 추측 -- 모든 미알려 필드는 string
-    required: bool = True
+    required: bool = False  # 새 칸은 선택으로 초안한다(CMD-K9)
 
     def to_dict(self) -> dict:
         d = {"type": self.type}
@@ -133,7 +134,7 @@ def suggest_new_fields(record_tools: dict[str, set[str]], model_tools: dict[str,
                     {
                         "name": field_name,
                         "type": infer_field_type(field_name),
-                        "required": True,  # 기본값 -- 사람이 검토
+                        "required": False,  # 이전 호출에 없던 칸 -- 선택일 가능성이 크다(CMD-K9). 사람이 검토
                         "note": "[DRAFT] 기록에서 찾은 새 칸"
                     }
                     for field_name in sorted(new_fields)

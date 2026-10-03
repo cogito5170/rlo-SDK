@@ -36,6 +36,60 @@ def _required():
     return [_pins.requirement(p) for p in _pins.REQUIRED.values()]
 
 
+# 요구 문자열은 뜻으로 비교한다(CMD-K9). 빌드 도구마다 글자가 다르다: `action-contract @ git+…` · `action-contract@ git+…`
+# (packaging < 22 의 str(Requirement) 꼴), 표지의 따옴표 · 빈칸, 이름의 대소문자 · `_`.
+def _requirement_class():
+    for mod in ("packaging.requirements", "pip._vendor.packaging.requirements"):
+        try:
+            return __import__(mod, fromlist=["Requirement"]).Requirement
+        except ImportError:
+            pass
+    return None
+
+
+def _canon(name: str) -> str:
+    import re
+    return re.sub(r"[-_.]+", "-", name.strip()).lower()                   # PEP 503
+
+
+def _req_plain(s: str) -> tuple:
+    """packaging 없이 -- `이름[extras] @ url ; 표지` 꼴만. 비교 꼴은 _req 와 같다."""
+    head, _, marker = s.partition(";")
+    name, at, url = head.partition("@")
+    extras = ()
+    if "[" in name:
+        name, _, ex = name.partition("[")
+        extras = tuple(sorted(_canon(x) for x in ex.rstrip().rstrip("]").split(",") if x.strip()))
+    marker = "".join(marker.split()).replace("'", '"') or None
+    return (_canon(name), extras, "", url.strip() if at else None, marker)
+
+
+def _req(s: str) -> tuple:
+    """요구 문자열 -> (이름, extras, 판 조건, url, 표지). 글자 꼴은 버리고 sha 를 포함한 뜻은 남긴다."""
+    R = _requirement_class()
+    if R is None:
+        return _req_plain(s)
+    r = R(s)
+    marker = "".join(str(r.marker).split()).replace("'", '"') if r.marker else None
+    return (_canon(r.name), tuple(sorted(_canon(x) for x in r.extras)), str(r.specifier), r.url, marker)
+
+
+def _manifest_mismatch(reqs: list) -> "list[str]":
+    """깔린 메타데이터의 요구(Requires-Dist) 가 고정 목록과 뜻으로 같은가. 다른 것들을 낸다(같으면 빈 목록)."""
+    got = [_req(r) for r in reqs]
+    plain = sorted(g for g in got if g[4] is None)
+    sensor = sorted(g[:4] for g in got if g[4] == _req('x ; extra == "sensor"')[4])
+    other = [g for g in got if g[4] is not None and g[4] != _req('x ; extra == "sensor"')[4]]
+    bad = []
+    if plain != sorted(_req(r) for r in _required()):
+        bad.append(f"필수: {plain}")
+    if sensor != sorted(_req(r)[:4] for r in _extras()["sensor"]):
+        bad.append(f"[sensor]: {sensor}")
+    if other:
+        bad.append(f"모르는 표지: {other}")
+    return bad
+
+
 def _extras():
     return {extra: [_pins.requirement(p) for p in group.values()] for extra, group in _pins.EXTRAS.items()}
 
@@ -44,7 +98,7 @@ class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
         self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
-        self.assertEqual(rlo.__version__, "0.4.1")
+        self.assertEqual(rlo.__version__, "0.5.0")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다
@@ -69,10 +123,34 @@ class Manifest(unittest.TestCase):
             reqs = metadata.requires("rlo-sdk")
         except metadata.PackageNotFoundError:
             self.skipTest("rlo-sdk 가 깔려 있지 않다(소스에서 돎)")
-        plain = [r for r in reqs if "extra ==" not in r]
-        sensor = [r.split(";")[0].strip() for r in reqs if "extra ==" in r]
-        self.assertEqual(plain, _required())
-        self.assertEqual(sensor, _extras()["sensor"])
+        self.assertEqual(_manifest_mismatch(reqs), [])
+
+    def test_builder_spellings_compare_by_meaning(self):
+        """ga 쪽 빌드의 꼴(`이름@ git+…`)도 같은 목록이다. sha · 이름 · extras 가 다르면 여전히 다르다(CMD-K9)."""
+        same = [_pins.requirement(p) for p in _pins.REQUIRED.values()] + \
+               [_pins.requirement(_pins.EXTRAS["sensor"]["sensor"]) + ' ; extra == "sensor"']
+        ga = [r.replace(" @ ", "@ ", 1).replace(' ; extra == "sensor"', " ; extra=='sensor'") for r in same]
+        self.assertNotEqual(ga, same)                                       # 글자는 다르다
+        self.assertEqual(_manifest_mismatch(same), [])
+        self.assertEqual(_manifest_mismatch(ga), [])                        # 뜻은 같다
+        self.assertEqual(_manifest_mismatch(list(reversed(ga))), [])        # 줄 순서는 빌드가 정한다
+        wrong_sha = [same[0][:-1] + ("0" if same[0][-1] != "0" else "1"), *same[1:]]
+        self.assertNotEqual(_manifest_mismatch(wrong_sha), [])
+        self.assertNotEqual(_manifest_mismatch(same[1:]), [])               # 하나 빠짐
+        self.assertNotEqual(_manifest_mismatch([*same[:-1], same[-1].replace("sensor\"", "other\"")]), [])
+
+    def test_both_normalizers_agree(self):
+        """packaging 이 있든 없든 같은 비교 꼴 -- 빈 venv 에 packaging 이 없을 수 있다."""
+        cases = ["action-contract @ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
+                 "Action_Contract@ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
+                 'llmsensor @ git+https://github.com/cogito5170/Sensor@97961e9 ; extra == "sensor"',
+                 "llmsensor@ git+https://github.com/cogito5170/Sensor@97961e9 ; extra=='sensor'"]   # url 뒤 ';' 앞 빈칸은 PEP 508
+        plain = [_req_plain(c) for c in cases]
+        self.assertEqual(plain[0], plain[1])
+        self.assertEqual(plain[2], plain[3])
+        self.assertNotEqual(plain[0][3], _req_plain(cases[0][:-1] + "x")[3])    # sha 한 글자도 다르면 다르다
+        if _requirement_class() is not None:
+            self.assertEqual([_req(c) for c in cases], plain)
 
     def test_pip_got_the_pinned_commits(self):
         """깔린 것이 git 에서 왔으면, 그 커밋이 고정 sha 와 같다(direct_url.json). 하나의 배포가 두 판으로 들어오지 않았다."""
@@ -98,7 +176,7 @@ MODULES = {"l0-telemetry": "telemetry", "dc": "dc", "ms": "ms", "action-contract
 
 
 def _norm(name: str) -> str:
-    return name.strip().lower().replace("_", "-")
+    return _canon(name)
 
 
 def _deps_from_pyproject(path: pathlib.Path, dist: str):
@@ -156,10 +234,10 @@ class PinGraph(unittest.TestCase):
         for dist in mine:
             reqs, where = requirements_of(dist)
             for r in reqs:
-                name = _norm(r.split("@", 1)[0])
+                name = _req(r)[0]
                 if name in mine:
                     checked.add((dist, name))
-                    self.assertEqual(" ".join(r.split()), mine[name], f"{dist} 가 요구하는 {name} ({where})")
+                    self.assertEqual(_req(r), _req(mine[name]), f"{dist} 가 요구하는 {r!r} ({where})")
         want = {("guard", "action-contract"), ("health", "action-contract"), ("ms", "action-contract")}
         if _present("llmsensor"):
             want.add(("llmsensor", "l0-telemetry"))
