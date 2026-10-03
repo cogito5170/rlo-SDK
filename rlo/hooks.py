@@ -41,6 +41,8 @@
   DC · guard 에 간다(값만으로는 막지 않는다, BD-123 B2). D 는 상태를 모를 때(UNKNOWN · 없음)만 막는다. health_ttl=True 로 되돌린다.
 - **판정 기한**(CMD-K13 S7): 판정이 deadline_s(기본 120 초, 호스트 기본 600 초보다 훨씬 짧게) 안에 끝나지 않으면 enforce 에서
   막는다(닫는 쪽) -- 시간이 다 된 훅을 호스트는 막지 않고 지나가게 하기 때문이다. 선언된 통로 호출만은 지나간다.
+- **사건 창**(CMD-K14): Sensor 에는 최근 window 개(기본 WINDOW) L0 사건만 넣는다 -- 판정 한 번의 비용이 세션 길이와 함께 자라지
+  않게(Sensor 가 사건을 나눠 받을 수 있을 때까지). 대기 중인 호출과 그 응답은 창 밖이라도 둔다. 기록 줄에 window.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
@@ -61,6 +63,7 @@ POLICY = "rlo-hooks@1"
 PURPOSE = "agent_tool_call"
 HEALTH_STATES = ("execution_health", "tool_execution_health")    # 훅에서 TTL 을 두지 않는 상태(S6)
 DEADLINE_S = 120.0                                              # 판정 기한(S7). None 이면 기한 없음
+WINDOW = 400                                                    # Sensor 에 넣는 최근 L0 사건 수(CMD-K14). None 이면 전부
 # 낡음만으로 생긴 D 의 안내(정해진 글 하나). 읽기만 하는 호출(위험 등급 밖, D 가 보지 않는다)의 결과가 상태를 새로 관측한다
 STALE_HINT = (" -- hint: the decision state is stale, not unavailable; make one read-only tool call to refresh it, "
               "then retry")
@@ -81,6 +84,31 @@ def without_call(events, tool_use_id) -> list:
     drop = {e["data"].get("tool_index") for e in events
             if e["type"] == "tool.start" and e["data"].get("tool_use_id") == tool_use_id}
     return [e for e in events if not (e["type"] in ("tool.start", "tool.end") and e["data"].get("tool_index") in drop)]
+
+
+def window_events(events, k) -> "tuple[list, int]":
+    """최근 k 개 L0 사건만 남긴다(CMD-K14 S1). (남긴 사건, 버린 수). k 가 None 이면 그대로.
+    창 밖이라도 둔다: 결과가 없는 tool.start(대기 중 -- UNKNOWN 을 그대로 본다), 창 안 tool.end 의 짝 tool.start, 그리고
+    남는 tool.start(창 안 것도)를 낸 llm.response(같은 call_index -- 그것 없이는 Sensor 가 호출을 세지 않는다). 차례는 원래 차례 그대로다."""
+    events = list(events)
+    if k is None or len(events) <= k:
+        return events, 0
+    cut = len(events) - k
+    ended = {e["data"].get("tool_index") for e in events if e["type"] == "tool.end"}
+    late = {e["data"].get("tool_index") for e in events[cut:] if e["type"] == "tool.end"}
+    starts = [e for e in events[:cut] if e["type"] == "tool.start"
+              and (e["data"].get("tool_index") not in ended or e["data"].get("tool_index") in late)]
+    calls = {e["data"].get("call_index") for e in starts + events[cut:] if e["type"] == "tool.start"} - {None}
+    ids = {id(e) for e in starts}
+    kept = [e for e in events[:cut] if id(e) in ids or (e["type"] == "llm.response" and e["data"].get("call_index") in calls)]
+    out = kept + events[cut:]
+    return out, len(events) - len(out)
+
+
+def check_window(k):
+    if k is not None and (not isinstance(k, int) or isinstance(k, bool) or k <= 0):
+        raise ValueError(f"window: 0 보다 큰 정수 또는 None ({k!r})")
+    return k
 
 
 def input_problem(input_data) -> "str | None":
@@ -123,10 +151,12 @@ class TranscriptJudge:
     substitutes  운영자의 대체표 {도구: [같은 목적의 도구, …]}(CMD-K11). A1 의 use_tool 대안이 여기서만 나온다
     channels     운영자의 통로 선언(CMD-K13, rlo.react.channels_of 의 꼴)
     health_ttl   False(기본): execution_health · tool_execution_health 에 TTL 을 두지 않는다(S6). True: Sensor 설정 그대로
+    window       Sensor 에 넣는 최근 L0 사건 수(CMD-K14, 기본 WINDOW). 대기 중인 tool.start 는 늘 둔다. None 이면 전부
     """
 
     def __init__(self, model, *, grants=(), risky=None, purpose=PURPOSE, capabilities=None, sensor_config=None,
-                 clock=None, policy: str = POLICY, substitutes=None, channels=None, health_ttl: bool = False):
+                 clock=None, policy: str = POLICY, substitutes=None, channels=None, health_ttl: bool = False,
+                 window: "int | None" = WINDOW):
         from guard import GuardModel
         from guard.views import DEFAULT_RISKY
         try:
@@ -143,6 +173,8 @@ class TranscriptJudge:
         self.clock = clock or (lambda: time.time() * 1000)
         self.substitutes = {k: list(v) for k, v in (substitutes or {}).items()}
         self.channels = list(channels or [])             # CMD-K13: rlo.react.channels_of 의 꼴
+        self.window = check_window(window)
+        self.last_window = None                          # (tool_use_id, {size, fed, dropped}) -- 마지막 거둠
 
     def collect(self, input_data: dict, *, exclude_current: bool = False):
         """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState). exclude_current 면 지금 호출을 뺀다(PreToolUse)."""
@@ -156,6 +188,8 @@ class TranscriptJudge:
         events = from_cc_jsonl(path, run)
         if exclude_current:
             events = without_call(events, input_data.get("tool_use_id"))
+        events, dropped = window_events(events, self.window)
+        self.last_window = (input_data.get("tool_use_id"), {"size": self.window, "fed": len(events), "dropped": dropped})
         return run, from_l0(events, clock=self.clock, **kw)
 
     def view(self, input_data: dict):
@@ -254,6 +288,9 @@ class HookAdapter:
                    "tool_input_keys": sorted(it.args),          # 칸 이름만(값은 싣지 않는다) -- 모형을 넓힐 근거
                    "dc_id": dcv.dc_id, "complete": dcv.complete,
                    "missing_required": list(dcv.missing_required), "result": res.to_dict()}
+            lw = getattr(self.judge, "last_window", None)
+            if lw and lw[0] == input_data.get("tool_use_id"):
+                row["window"] = lw[1]                # CMD-K14: 창 크기 · 넣은 수 · 버린 수
             obj, stale = None, res.verdict != "ALLOW" and stale_only(res, dcv)
             ch = R.channel_of(it.action, it.args, getattr(self.judge, "channels", None)) if stale else None
             if ch is not None:                       # CMD-K13 S1: 낡음뿐인 D 는 고정된 통로 호출을 막지 않는다
@@ -365,6 +402,8 @@ def _parser():
                     help=f"판정 기한(초, 기본 {DEADLINE_S:g}). 넘으면 enforce 에서 막는다(통로 호출만 지나간다). 0 이면 기한 없음")
     ap.add_argument("--health-ttl", action="store_true",
                     help="두 건강 상태에도 Sensor TTL 을 둔다(CMD-K13 S6 이전 동작 -- 재생 · 비교용)")
+    ap.add_argument("--window", type=int, default=WINDOW,
+                    help=f"Sensor 에 넣는 최근 L0 사건 수(기본 {WINDOW}, CMD-K14). 대기 중인 호출은 늘 넣는다. 0 이면 전부")
     return ap
 
 
@@ -387,7 +426,7 @@ def _adapter_from_args(a, record=None) -> HookAdapter:
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
                        clock=clock, substitutes=substitutes, channels=channels, health_ttl=a.health_ttl,
-                       deadline_s=a.deadline_s or None)
+                       window=a.window or None, deadline_s=a.deadline_s or None)
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:
