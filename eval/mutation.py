@@ -166,6 +166,13 @@ MUTANTS = [
         "            if self.calls_in_run == 0 or not (0 < wait_s <= max_inline_wait_s):", "            if True:")]),
     ("autonomy: close_windows 가 다시 보내지 않음", [("rlo/autonomy.py",
         "        return self.runtime.close_windows() + self.tick()", "        return self.runtime.close_windows()")]),
+    ("scheduler: 저장한 지킴이 창을 되살리지 않음", [("rlo/scheduler.py", '        self.gov.load(d["governor"])\n', "")]),
+    ("scheduler: 상태를 저장하지 않음", [("rlo/scheduler.py", "        os.replace(tmp, path)", "        os.remove(tmp)")]),
+    ("scheduler: 끝난 걸음 결과를 되살리지 않음", [("rlo/scheduler.py", '                self.results[sid] = d["results"][sid]', "                pass")]),
+    ("scheduler: wait=False 인데 잔다", [("rlo/scheduler.py", "            if not wait:\n", "            if False:\n")]),
+    ("scheduler: status 의 running 이 모형 걸음을 모름", [("rlo/scheduler.py",
+        "        payload = s.payload(self.results) if callable(s.payload) else s.payload\n        self.running = s.id\n",
+        "        payload = s.payload(self.results) if callable(s.payload) else s.payload\n")]),
     # 기록을 읽는 도구(CMD-K9)
     ("suggest-model: 새 칸을 필수로 초안", [("rlo/suggest_model/__init__.py", '"required": False,  # 이전 호출에 없던 칸', '"required": True,  # 이전 호출에 없던 칸')]),
     ("suggest-model: 새 칸에 초안 표시 없음", [("rlo/suggest_model/__init__.py", '"note": "[DRAFT] 기록에서 찾은 새 칸"', '"note": "기록에서 찾은 새 칸"')]),

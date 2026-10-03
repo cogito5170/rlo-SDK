@@ -17,6 +17,14 @@ StepKindError(시작하지 않는다). 표는 rlo 의 것이다(action-model/1 �
 - 세움 · 보냄 · 429 마다 L0 사건(닫힌 목록 안: runtime.status · llm.request · llm.response · llm.error · tool.start/end)과
   원장 줄 하나. 걸음 id 는 원장에 있다(L0 사건 목록에 걸음 칸이 없다 -- 모형 걸음은 call_index 로 잇는다).
 - VERIFY(health): 세운 걸음마다 "창(대기 + 여유) 안에 보냈다" 를 health `verify` 로 판정해 원장에 남긴다.
+
+저장 · 상태(S6, BD-221):
+- `state=` 경로를 주면 바뀔 때마다 JSON(`rlo-scheduler-state/1`: 걸음마다 상태 · 시도 수, 끝난 걸음의 결과(JSON 이 되는 것만),
+  지킴이 창, 세운 걸음의 VERIFY 창)으로 저장하고, 그 파일이 있으면 시작할 때 읽어 이어 간다(프로세스를 다시 띄워도).
+  다시 띄울 때는 같은 걸음(id · 이름)을 다시 싣는다 -- 함수는 저장되지 않는다. 결과가 JSON 이 아니어서 저장되지 않은 끝난 걸음은
+  다시 돈다(원장 rerun_after_restart).
+- `status()` = {resumes_in_s, done, running, parked, next} -- ga 의 감독(CMD-GA21)이 그대로 찍고 남긴다.
+- `run(wait=False)`: 자야 할 때 자지 않고 저장한 뒤 돌아온다(감독이 기다렸다가 다시 부른다).
 """
 from __future__ import annotations
 
@@ -35,6 +43,7 @@ STEP_KINDS_SCHEMA = "rlo-step-kinds/1"
 KINDS = ("model", "tool")
 DONE, FAILED, SKIPPED, PENDING, PARKED = "done", "failed", "skipped", "pending", "parked"
 TERMINAL = (DONE, FAILED, SKIPPED)
+STATE_SCHEMA = "rlo-scheduler-state/1"
 
 
 class StepKindError(ValueError):
@@ -78,6 +87,7 @@ class Report:
     provider_calls: int
     ledger: list
     events: list                               # L0 사건(메모리 sink 일 때)
+    status: dict = dataclasses.field(default_factory=dict)     # 끝났을 때의 status()
 
     @property
     def ok(self) -> bool:
@@ -123,6 +133,13 @@ class ParkVerify:
         due = [sid for sid, (cmd, w) in self.pending.items() if now_s * 1000 >= cmd.issued_at + w]
         return [(sid, self._verify(sid, False, now_s)) for sid in due]
 
+    def to_dict(self) -> dict:
+        return {sid: [cmd.issued_at, w] for sid, (cmd, w) in self.pending.items()}
+
+    def restore(self, d: dict) -> None:
+        for sid, (issued_ms, window_ms) in d.items():
+            self.park(sid, issued_ms / 1000, window_ms / 1000 - self.grace_s)
+
 
 def _usage(resp):
     """응답에서 사용량(dict). dict 의 usage · usageMetadata, 또는 .usage 속성. 없으면 None."""
@@ -135,8 +152,9 @@ def _usage(resp):
 class Scheduler:
     def __init__(self, steps, governor: Governor, provider: Callable, *, kinds, clock=None, sleep=None, l0=None,
                  ledger=None, run_id: str = "sched", provider_name: "str | None" = None, usage_format=None,
-                 max_rate_limits: int = 10, grace_s: float = 5.0):
-        """kinds: 걸음 표(load_step_kinds 의 꼴 또는 {이름: 종류}). l0: None(메모리) · 경로 · sink. ledger: 경로(JSONL) 또는 None."""
+                 max_rate_limits: int = 10, grace_s: float = 5.0, state=None, on_event=None):
+        """kinds: 걸음 표(load_step_kinds 의 꼴 또는 {이름: 종류}). l0: None(메모리) · 경로 · sink. ledger: 경로(JSONL) 또는 None.
+        state: 저장 파일 경로(있으면 읽어 이어 간다). on_event(row): 원장 줄마다(감독이 status() 를 찍는 자리)."""
         table = kinds if isinstance(kinds, (str, os.PathLike)) or (isinstance(kinds, dict) and "schema" in kinds) \
             else {"schema": STEP_KINDS_SCHEMA, "steps": kinds}
         self.kinds = load_step_kinds(table)
@@ -160,8 +178,15 @@ class Scheduler:
         self.results, self.failed, self.skipped = {}, {}, {}
         self.attempts, self.rate_limits, self.call_index = {}, {}, {}
         self.sleeps, self.slept, self.calls = 0, 0.0, 0
+        self.running = None
+        self.state_path, self.on_event = state, on_event
+        self._loading = True
         for s in steps:
             self.add(s)
+        if state and os.path.exists(state):
+            with open(state, encoding="utf-8") as f:
+                self._load(json.load(f))
+        self._loading = False
 
     # ── 걸음 싣기 ──
     def kind(self, step: Step) -> str:
@@ -190,6 +215,71 @@ class Scheduler:
         if self.ledger_path:
             with open(self.ledger_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        if self.state_path and not self._loading:
+            self.save()
+        if self.on_event is not None:
+            self.on_event(row)
+
+    # ── 저장 · 상태(S6) ──
+    def save(self, path=None) -> None:
+        """지금 상태를 JSON 으로(임시 파일에 쓰고 바꿔 끼운다 -- 쓰다 죽어도 앞 저장이 남는다)."""
+        path = path or self.state_path
+        results = {}
+        for sid, v in self.results.items():
+            try:
+                json.dumps(v)
+            except (TypeError, ValueError):
+                continue
+            results[sid] = v
+        d = {"schema": STATE_SCHEMA, "run_id": self.run_id, "saved_at": self.clock(),
+             "steps": {sid: {"name": self.steps[sid].name, "state": self.state[sid],
+                             "attempts": self.attempts.get(sid, 0), "rate_limits": self.rate_limits.get(sid, 0),
+                             "call_index": self.call_index.get(sid), "failed": self.failed.get(sid),
+                             "skipped": self.skipped.get(sid)} for sid in self.order},
+             "results": results, "governor": self.gov.to_dict(), "verify": self.verify.to_dict()}
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, sort_keys=True)
+        os.replace(tmp, path)
+
+    def _load(self, d: dict) -> None:
+        if not isinstance(d, dict) or d.get("schema") != STATE_SCHEMA:
+            raise StepKindError(f"저장 상태가 {STATE_SCHEMA} 가 아니다")
+        for sid, st in d["steps"].items():
+            if sid not in self.steps or self.steps[sid].name != st["name"]:
+                raise StepKindError(f"저장 상태의 걸음 {sid}({st['name']}) 이 실은 걸음과 다르다 -- 같은 걸음을 다시 싣는다")
+        self.gov.load(d["governor"])
+        for sid, st in d["steps"].items():
+            self.attempts[sid], self.rate_limits[sid] = st["attempts"], st["rate_limits"]
+            if st["call_index"] is not None:
+                self.call_index[sid] = st["call_index"]
+            if st["state"] == DONE and sid not in d["results"]:
+                self._row("rerun_after_restart", self.steps[sid])         # 결과를 저장하지 못했다 -- 다시 돈다
+                continue
+            self.state[sid] = st["state"]
+            if st["state"] == DONE:
+                self.results[sid] = d["results"][sid]
+            elif st["state"] == FAILED:
+                self.failed[sid] = st["failed"]
+            elif st["state"] == SKIPPED:
+                self.skipped[sid] = st["skipped"]
+        self.verify.restore(d["verify"])
+        self._loading = False
+        self._row("resume", self.steps[self.order[0]], saved_at=d["saved_at"]) if self.order else None
+
+    def status(self) -> dict:
+        """{resumes_in_s, done, running, parked, next}. resumes_in_s: 세운 걸음이 있으면 창이 열릴 때까지(초), 기다려도 열리지 않으면
+        (하루 할당) None, 세운 걸음이 없으면 None. next: 끝나지 않은 걸음(지금 도는 것 빼고)의 차례 [{id, kind}]."""
+        parked = [sid for sid in self.order if self.state[sid] == PARKED]
+        resumes = None
+        m = self._next_model()
+        if parked and m is not None:
+            w = self.gov.wait_s(m.est_tokens, m.model)
+            resumes = round(w, 3) if math.isfinite(w) else None
+        return {"resumes_in_s": resumes, "done": [sid for sid in self.order if self.state[sid] == DONE],
+                "running": self.running, "parked": parked,
+                "next": [{"id": sid, "kind": self.kinds[self.steps[sid].name]} for sid in self.order
+                         if self.state[sid] not in TERMINAL and sid != self.running]}
 
     # ── 돌리기 ──
     def _deps(self, s: Step) -> "str | None":
@@ -200,14 +290,17 @@ class Scheduler:
         return "ok" if all(x == DONE for x in st) else None
 
     def _run_tool(self, s: Step) -> None:
+        self.running = s.id
         try:
             with self.rec.tool(s.name, {}) as t:
                 v = s.fn(self.results)
                 t.result(is_error=False)
         except Exception as e:
+            self.running = None
             self.state[s.id], self.failed[s.id] = FAILED, type(e).__name__
             self._row("failed", s, exception=type(e).__name__)
             return
+        self.running = None
         self.state[s.id], self.results[s.id] = DONE, v
         self._row("done", s, step_kind="tool")
 
@@ -231,9 +324,11 @@ class Scheduler:
                 self._row("verification", s, result=rec.result, reason=rec.reason, verification_id=rec.id)
         self.calls += 1
         payload = s.payload(self.results) if callable(s.payload) else s.payload
+        self.running = s.id
         try:
             resp = self.provider(payload)
         except Exception as e:
+            self.running = None
             status, body, headers = Governor.rate_limit_parts(e)
             self.rec.llm_error(idx, self.provider_name, http_status=status, body=body, headers=headers, attempt=attempt,
                                exception=type(e).__name__, table=self.gov.provider)
@@ -252,6 +347,7 @@ class Scheduler:
             self.state[s.id], self.failed[s.id] = FAILED, type(e).__name__
             self._row("failed", s, exception=type(e).__name__)
             return
+        self.running = None
         u = _usage(resp)
         self.gov.observe(ticket, u, model=s.model)
         self.rec.llm_response(idx, self.provider_name, usage=u, usage_format=self.usage_format)
@@ -266,7 +362,8 @@ class Scheduler:
                 return s if self._deps(s) == "ok" else None
         return None
 
-    def run(self) -> Report:
+    def run(self, wait: bool = True) -> Report:
+        """wait=False: 자야 할 때 자지 않고(저장한 뒤) 돌아온다 -- report.status.resumes_in_s 뒤에 다시 부른다."""
         while True:
             now = self.clock()
             for sid, rec in self.verify.close(now):
@@ -309,9 +406,14 @@ class Scheduler:
             wake = [t for t in wake if t > now]
             if not wake:
                 break                            # 기다려도 바뀌지 않는다(하루 할당 · 풀 수 없는 앞 걸음) -- 세운 채로 끝낸다
+            if not wait:
+                if self.state_path:
+                    self.save()
+                break
             d = min(wake) - now
             self.sleep(d)
             self.sleeps, self.slept = self.sleeps + 1, self.slept + d
         parked = [sid for sid in self.order if self.state[sid] not in TERMINAL]
         return Report(dict(self.results), dict(self.failed), dict(self.skipped), parked, self.sleeps,
-                      round(self.slept, 6), self.calls, list(self.rows), list(self._mem.events) if self._mem else [])
+                      round(self.slept, 6), self.calls, list(self.rows), list(self._mem.events) if self._mem else [],
+                      self.status())

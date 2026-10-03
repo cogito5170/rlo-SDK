@@ -214,6 +214,11 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   (`attempt` = 다시 보낸 횟수) · `llm.response` · `llm.error`(`retry_after_ms`, `error_code` RATE_LIMITED) · `tool.start/end`).
   L0 사건 목록에 걸음 칸이 없어서 모형 걸음은 `call_index` 로 잇는다.
 - **VERIFY(health)**: 세운 걸음마다 "창(대기 + 여유 5 초) 안에 보냈다" 를 health `verify` 로 판정한다(원장 `verification`).
+- **저장 · 이어 가기 · 상태(S6)**: `Scheduler(..., state="sched.json")` 는 바뀔 때마다 상태(`rlo-scheduler-state/1`: 걸음마다 상태 ·
+  시도 수, 끝난 걸음의 결과(JSON 이 되는 것만), 지킴이 창, 세운 걸음의 VERIFY 창)를 저장하고, 파일이 있으면 시작할 때 읽어 이어 간다
+  — 프로세스를 다시 띄워도 끝난 모형 걸음을 다시 부르지 않고, 지킴이 창도 되살아난다. 다시 띄울 때 같은 걸음(id · 이름)을 다시
+  싣는다(함수는 저장되지 않는다). `run(wait=False)` 는 자야 할 때 저장하고 돌아온다. `status()` =
+  `{resumes_in_s, done, running, parked, next: [{id, kind}]}` 를 감독(ga `ga gemini`)이 그대로 찍는다. `on_event(row)` 는 원장 줄마다 불린다.
 - **`Autonomy(..., governor=)`**: LLM 을 감싼다. 한 `handle` 의 첫 부름 앞에서 예산이 없거나 429 면 실패하지 않고
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)

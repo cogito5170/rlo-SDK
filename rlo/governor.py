@@ -139,6 +139,26 @@ class Governor:
                 x[1] = tok
                 return
 
+    # ── 저장 · 다시 읽기(CMD-K12 S6) -- 창은 절대 시각(시계의 단위)으로 남는다. 무한 대기는 "inf" ──
+    def to_dict(self) -> dict:
+        return {"windows": {m: [[t, tok] for t, tok, _ in q] for m, q in self._calls.items()},
+                "blocked_until": {m: ("inf" if math.isinf(b) else b) for m, b in self._blocked_until.items()}}
+
+    def load(self, d: dict) -> None:
+        """to_dict 의 꼴을 다시 싣는다. 예산 밖 모형은 받지 않는다(설정이 바뀌었으면 알린다)."""
+        if not isinstance(d, dict) or set(d) != {"windows", "blocked_until"}:
+            raise ValueError("지킴이 상태: {windows, blocked_until} 이어야 한다")
+        unknown = (set(d["windows"]) | set(d["blocked_until"])) - set(self.budgets)
+        if unknown:
+            raise ValueError(f"지킴이 상태에 예산 밖 모형 {sorted(unknown)}")
+        for m, rows in d["windows"].items():
+            self._calls[m] = collections.deque()
+            for t, tok in rows:
+                self._tickets += 1
+                self._calls[m].append([float(t), int(tok), self._tickets])
+        for m, b in d["blocked_until"].items():
+            self._blocked_until[m] = math.inf if b == "inf" else float(b)
+
     @staticmethod
     def rate_limit_parts(exc) -> "tuple[int | None, dict | None, dict | None]":
         """예외 -> (HTTP 상태, 본문, 헤더). MS ProviderError 는 status · body · headers 를 싣는다."""

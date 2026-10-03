@@ -315,6 +315,153 @@ class SchedulerRun(unittest.TestCase):
         self.assertEqual(r.done["a"], {"text": "x"})
 
 
+RESTART = r"""
+import json, sys
+from rlo.governor import Governor
+from rlo.scheduler import Scheduler, Step
+phase, state, t0 = sys.argv[1], sys.argv[2], float(sys.argv[3])
+class Clock:
+    t = t0
+    def __call__(self): return self.t
+    def sleep(self, d): self.t += d
+c = Clock()
+calls = []
+def provider(p):
+    calls.append([c(), p])
+    return {"text": "ok " + p}
+steps = [Step("t1", "read", fn=lambda r: "data"),
+         Step("m1", "plan", payload=lambda r: "a:" + r["t1"], after=("t1",)),
+         Step("m2", "plan", payload="b"),
+         Step("t2", "render", fn=lambda r: r["m1"]["text"] + "|" + r["m2"]["text"], after=("m1", "m2")),
+         Step("m3", "judge", payload=lambda r: "c:" + r["t2"], after=("t2",))]
+s = Scheduler(steps, Governor({"m": {"rpm": 1}}, clock=c), provider,
+              kinds={"read": "tool", "render": "tool", "plan": "model", "judge": "model"},
+              clock=c, sleep=c.sleep, state=state)
+r = s.run(wait=(phase == "second"))
+print(json.dumps({"status": r.status, "failed": r.failed, "calls": calls, "done": sorted(r.done), "t": c.t,
+                  "results": {k: v for k, v in r.done.items() if isinstance(v, str)}}))
+"""
+
+
+class SavedState(unittest.TestCase):
+    """CMD-K12 S6 · D5: 세운 채 저장 -> 새 프로세스에서 읽어 실패 0 으로 끝낸다. status() 는 어느 때나 큐와 같다."""
+
+    def setUp(self):
+        self.d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.d)
+
+    def phase(self, name, t0):
+        import os
+        import subprocess
+        import sys
+        script = self.d / "restart.py"
+        script.write_text(RESTART, encoding="utf-8")
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(pathlib.Path(rlo.__file__).resolve().parent.parent),
+                                                           os.environ.get("PYTHONPATH", "")]))
+        p = subprocess.run([sys.executable, str(script), name, str(self.d / "state.json"), str(t0)],
+                           capture_output=True, text=True, cwd=str(self.d), env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.loads(p.stdout)
+
+    def test_save_while_parked_then_finish_in_a_new_process(self):
+        first = self.phase("first", 0.0)
+        self.assertEqual(first["failed"], {})
+        self.assertEqual(first["done"], ["m1", "t1"])
+        self.assertEqual(first["status"]["parked"], ["m2"])
+        self.assertEqual(first["status"]["resumes_in_s"], 60.0)
+        self.assertEqual([x["id"] for x in first["status"]["next"]], ["m2", "t2", "m3"])
+        self.assertEqual([p for _, p in first["calls"]], ["a:data"])
+        saved = json.loads((self.d / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["schema"], "rlo-scheduler-state/1")
+        self.assertEqual(saved["steps"]["m2"]["state"], "parked")
+        self.assertEqual(saved["governor"]["windows"]["m"], [[0.0, 0]])
+        second = self.phase("second", 30.0)                      # 창이 열리기 전에 다시 띄웠다
+        self.assertEqual(second["failed"], {})
+        self.assertEqual(second["done"], ["m1", "m2", "m3", "t1", "t2"])
+        self.assertEqual(second["status"], {"resumes_in_s": None, "done": ["t1", "m1", "m2", "t2", "m3"],
+                                            "running": None, "parked": [], "next": []})
+        # 지킴이 창이 되살아났다: 30 초에 다시 띄웠어도 60 초 전에는 부르지 않았다. m1 은 다시 부르지 않았다
+        self.assertEqual(second["calls"], [[60.0, "b"], [120.0, "c:ok a:data|ok b"]])
+
+    def test_status_matches_the_queue_at_every_point(self):
+        seen = []
+        c = Clock()
+        g = Governor({"m": {"rpm": 1}}, clock=c)
+        holder = {}
+
+        def look(where):
+            seen.append((where, holder["s"].status()))
+
+        def provider(p):
+            look(("provider", p))
+            if p == "p2" and not any(w == ("provider", "p2") for w, _ in seen[:-1]):
+                raise Http429("7s")
+            return {"text": p}
+
+        steps = [Step("t1", "read", fn=lambda r: look(("tool", "t1"))),
+                 Step("m1", "plan", payload="p1"), Step("m2", "plan", payload="p2"),
+                 Step("t2", "render", fn=lambda r: look(("tool", "t2")), after=("m2",)),
+                 Step("t3", "check", fn=lambda r: look(("tool", "t3")), not_before=30.0)]
+        s = Scheduler(steps, g, provider, kinds=KINDS, clock=c, sleep=c.sleep, on_event=lambda row: look(row))
+        holder["s"] = s
+        r = s.run()
+        self.assertTrue(r.ok)
+        done, parked, kinds = [], [], {"t1": "tool", "m1": "model", "m2": "model", "t2": "tool", "t3": "tool"}
+        order = ["t1", "m1", "m2", "t2", "t3"]
+        for where, st in seen:
+            if isinstance(where, dict):                          # 원장 줄 -- 그 줄까지 다시 세운 큐와 같아야 한다
+                row = where
+                if row["kind"] == "done":
+                    done.append(row["step"])
+                    parked = [x for x in parked if x != row["step"]]
+                elif row["kind"] == "park":
+                    parked = [x for x in parked if x != row["step"]] + [row["step"]]
+                self.assertIsNone(st["running"])
+                if row["kind"] == "park":
+                    self.assertEqual(st["resumes_in_s"], row["wait_s"])
+                running = None
+            else:
+                running = where[1] if where[0] == "tool" else {"p1": "m1", "p2": "m2"}[where[1]]
+                self.assertEqual(st["running"], running)
+            self.assertEqual(st["done"], [x for x in order if x in done])
+            self.assertEqual(st["parked"], [x for x in order if x in parked])
+            self.assertEqual(st["next"], [{"id": x, "kind": kinds[x]} for x in order if x not in done and x != running])
+            if not st["parked"]:
+                self.assertIsNone(st["resumes_in_s"])
+        self.assertGreater(len(seen), 15)
+
+    def test_unsaved_results_rerun_and_mismatched_steps_are_refused(self):
+        c = Clock()
+        state = str(self.d / "s.json")
+        mk = lambda steps: Scheduler(steps, Governor({"m": {"rpm": 1}}, clock=c), lambda p: {"text": p},
+                                     kinds=KINDS, clock=c, sleep=c.sleep, state=state)
+        ran = []
+        steps = lambda: [Step("t1", "read", fn=lambda r: ran.append(1) or object()),
+                         Step("m1", "plan", payload="x"), Step("m2", "plan", payload="y")]
+        r = mk(steps()).run(wait=False)
+        self.assertEqual((r.parked, len(ran)), (["m2"], 1))
+        s2 = mk(steps())
+        self.assertIn("rerun_after_restart", [x["kind"] for x in s2.rows])      # object() 는 JSON 이 아니다
+        c.t = 60
+        self.assertTrue(s2.run().ok)
+        self.assertEqual(len(ran), 2)
+        with self.assertRaises(StepKindError):
+            mk([Step("t1", "check", fn=lambda r: 1), Step("m1", "plan", payload="x"), Step("m2", "plan", payload="y")])
+
+    def test_governor_round_trip(self):
+        c = Clock(5.0)
+        g = Governor({"a": {"rpm": 2}, "b": {"tpm": 10}}, clock=c)
+        g.try_acquire(model="a")
+        g.on_rate_limit(Http429(None, "Day"), model="b")
+        d = json.loads(json.dumps(g.to_dict()))
+        h = Governor({"a": {"rpm": 2}, "b": {"tpm": 10}}, clock=c)
+        h.load(d)
+        self.assertEqual((h.wait_s(model="a"), h.wait_s(model="a", calls=2)), (0.0, 60.0))
+        self.assertTrue(math.isinf(h.wait_s(model="b")))
+        with self.assertRaises(ValueError):
+            Governor({"a": {"rpm": 2}}, clock=c).load(d)
+
+
 class AutonomyGoverned(unittest.TestCase):
     """CMD-K12 S4: Autonomy(governor=) -- 예산이 비었거나 429 면 미룬 결과, tick · close_windows 가 다시 보낸다."""
 
