@@ -330,6 +330,13 @@ class Packaging(unittest.TestCase):
                                timeout=120)
             self.assertEqual(v.returncode, 0, v.stdout[-2000:])
 
+    def test_claude_code_plugin_bad_budget_writes_nothing(self):
+        out = self.d / "bad"
+        p = subprocess.run([sys.executable, "-m", "rlo.hooks", "claude-plugin", "--out", str(out), "--model", self.MODEL,
+                            "--budget-soft", "150000"], capture_output=True, text=True)       # hard 가 없다
+        self.assertEqual(p.returncode, 1)
+        self.assertFalse(out.exists() and any(out.iterdir()))                                 # 반쯤 지은 꼴을 남기지 않는다
+
 
 if __name__ == "__main__":
     unittest.main()
