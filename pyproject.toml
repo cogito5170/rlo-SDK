@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlo-sdk"
-version = "0.8.1"
+version = "0.8.2"
 description = "rlo SDK -- 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 한 입구로 묶는다"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sensor = ["llmsensor @ git+https://github.com/cogito5170/Sensor@97961e98e6e55b87ea1bbb8483bb99269e5e3900"]
+sensor = ["llmsensor @ git+https://github.com/cogito5170/Sensor@f1e45b5a6528b7a6e549e24b82be636caec15078"]
 
 [tool.setuptools]
 packages = ["rlo", "rlo.suggest_model"]

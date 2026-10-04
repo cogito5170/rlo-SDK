@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.8.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.8.2", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -78,7 +78,7 @@ MS 의 sha 없는 `ms[sensor]` extras 는 `rlo-sdk[sensor]` 와 함께 깔면 �
 | action | `action-contract` | `3995fdb` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `3995fdb` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
 | guard | `guard` | `be871b9` | 필수 |
 | health | `health` | `afcff39` | 필수 |
-| Sensor | `llmsensor` | `97961e9` | `[sensor]`. S26 — Telemetry 고정을 `35e8119` 로 올린 커밋 |
+| Sensor | `llmsensor` | `f1e45b5` | `[sensor]`. SEN1 · SEN2 — 이어 받기(`RunState.extend`) · `evaluate="once"`, Telemetry 고정은 `35e8119` 그대로 |
 
 ## 시험
 
@@ -166,13 +166,19 @@ Stop · SessionEnd ─► 거둠(판정 없음)        PostToolUse(Failure) ─�
   `--deadline-s`(기본 120 초, `guard_hooks(deadline_s=)`) 안에 끝나지 않으면 enforce 에서 `rlo hook deadline exceeded` 로 막고
   react 는 `report`(rule hook, cause deadline). **선언된 통로 호출만은 지나간다**(기록 `guard_deadline` · `allowed: channel:<도구>`).
   0 이면 기한 없음. 판정은 따로 된 스레드에서 돌고 부수 효과가 없어, 기한을 넘으면 버린다.
-- **판정 비용**: Sensor 는 사건마다 모든 지표를 다시 계산한다 — 10 MB 실제 transcript(L0 사건 1,726)에서 한 번에 약 62 초. 사건을
-  나눠 받는 길이 Sensor 에 없어서(“더 받으려면 모든 사건으로 다시 만든다”) rlo 가 이어 받을 수 없다. Sensor 에 요청했다(baseline#3,
-  CMD-SEN1). 그때까지는 아래 **사건 창**이 비용을 묶는다.
-- **사건 창**(CMD-K14): 훅은 Sensor 에 **최근 `WINDOW` 개(기본 400) L0 사건**만 넣는다(`--window N`, `TranscriptJudge(window=)`;
+- **판정 비용 · 이어 받기**(CMD-K14 S2, Sensor `f1e45b5` 의 `RunState.extend` · `evaluate="once"`): 훅은 transcript 마다
+  RunState 를 두고(`TranscriptJudge` 안, 최대 `CACHE_MAX` 개) 새 사건만 `extend` 로 넣는다. 처음 · 다른 파일(장치 · inode ·
+  줄어듦 · 머리 4 KB 가 다름) · 지금 호출의 사건이 이미 들어 있을 때(나란히 부른 앞 호출)는 `evaluate="once"`(선형)로 새로 짓는다.
+  값 · 유효성 · 근거 시각은 전부 넣은 것과 같다(Sensor 의 보장, 위 조건에서). **명령 훅은 부를 때마다 새 프로세스**라 캐시가 없어
+  늘 once 로 짓는다 — 10 MB 실제 transcript(L0 사건 1,726)에서 한 번에 약 0.5 초(예전 약 62 초), 사건을 버리지 않는다.
+  같은 프로세스에서 부르는 어댑터(Agent SDK)는 둘째 부름부터 extend 다. 남은 비용은 선형이다: Telemetry 가 transcript 전체를
+  다시 읽는 것(10 MB 에 약 0.23 초)과 Sensor compat 한 번 훑기. 기록 줄의 `window.mode` 가 길을 말한다
+  (`incremental` · `once:first` · `once:other_file` · `once:current_seen` · `window`). `--no-incremental` 이면 아래 사건 창.
+- **사건 창**(CMD-K14 S1, 이제 **대체 길**): 이어 받기를 못 쓸 때 — 설정이 이력에 기대거나(`min_consecutive` ·
+  `resource_bands` · `latency_slo`, Sensor 가 전부 다시 짓는다) `--no-incremental` — 훅은 Sensor 에 **최근 `WINDOW` 개(기본 400) L0 사건**만 넣는다(`--window N`, `TranscriptJudge(window=)`;
   0 · None 이면 전부). 창 밖이라도 결과가 없는 `tool.start`(대기 중), 창 안 `tool.end` 의 짝 `tool.start`, 남는 호출을 낸
   `llm.response`(같은 `call_index`)는 둔다 — 그래서 대기 중인 호출로 생기는 UNKNOWN → D 는 창이 있어도 같다. 기록 줄에
-  `window: {size, fed, dropped}`. 같은 10 MB transcript 에서 한 번에 약 2.7 초(전부 넣으면 약 62 초), K13 재생의 판정은 전부 넣은
+  `window: {mode, size, fed, dropped}`. 같은 10 MB transcript 에서 한 번에 약 2.7 초(전부 넣으면 약 62 초), K13 재생의 판정은 전부 넣은
   것과 같다. **다른 곳**: 창 밖의 일은 보이지 않는다 — 풀리지 않은 옛 실패는 값(`UNRESOLVED_FAILURES`)에서 빠지고(선택 B 에서는 판정이
   같다), 창 안에서 쓰지 않은 도구의 `tool_execution_health` 는 없다(필수가 아니다 — 처음 쓰는 도구와 같다). 창 400 에서 Sensor 시간은
   약 3 초, 800 에서 약 12 초(제곱으로 자란다).

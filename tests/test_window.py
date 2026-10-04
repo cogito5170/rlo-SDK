@@ -1,4 +1,5 @@
-"""훅이 Sensor 에 넣는 사건 수에 한도를 둔다(CMD-K14) -- 긴 세션도 판정 한 번의 비용이 세션 길이와 함께 자라지 않는다."""
+"""훅이 Sensor 에 넣는 사건 수에 한도를 둔다(CMD-K14 S1) -- 긴 세션도 판정 한 번의 비용이 세션 길이와 함께 자라지 않는다.
+S2 부터 이 창은 대체 길이다(이어 받기를 못 쓸 때) -- 여기서는 incremental=False · --no-incremental 로 그 길을 본다."""
 import json
 import subprocess
 import sys
@@ -65,7 +66,7 @@ class WindowDecisions(Fixture):
     def judge_adapter(self, window, health_ttl=False, now=None):
         return hooks.guard_hooks(MODEL, mode="enforce", grants=("Bash", COMMENT), channels=R.channels_of({"channels": CHANNELS}),
                                  clock=lambda: now or self.now, record=lambda k, d: self.rows.append((k, d)),
-                                 health_ttl=health_ttl, window=window, deadline_s=None)
+                                 health_ttl=health_ttl, window=window, incremental=False, deadline_s=None)
 
     def reads(self, n, t0, prefix="r"):
         out = []
@@ -152,14 +153,15 @@ class WindowDecisions(Fixture):
         self.assertEqual((k1, k2), ("guard", "guard"))
         self.assertEqual(r1["window"]["size"], 4)
         self.assertTrue(4 <= r1["window"]["fed"] <= 6)              # 창 끝에서 잘린 호출 하나의 시작 · 응답이 따라올 수 있다
-        self.assertEqual(r2["window"], {"size": None, "fed": r1["window"]["fed"] + r1["window"]["dropped"], "dropped": 0})
+        self.assertEqual(r2["window"], {"mode": "window", "size": None, "fed": r1["window"]["fed"] + r1["window"]["dropped"],
+                                        "dropped": 0})
 
     def test_a_long_session_feeds_at_most_the_window(self):
         """한도: 사건이 창보다 훨씬 많아도 Sensor 에 가는 수는 창(+ 대기 중인 호출)을 넘지 않는다. 기본 창 그대로."""
         n = hooks.WINDOW // 2 + 40                                          # 사건 2n 개 > 창
         lines = [*self.base, *self.reads(n, self.now - 20 * n - 1000)]
         a = hooks.guard_hooks(MODEL, mode="enforce", grants=("Bash",), clock=lambda: self.now,
-                              record=lambda k, d: self.rows.append((k, d)))
+                              record=lambda k, d: self.rows.append((k, d)), incremental=False)
         self.assertEqual(a.handle(self.inp("Bash", {"command": "make"}, lines=lines, tu="tu-long")), {})
         w = self.rows[-1][1]["window"]
         self.assertEqual(w["size"], hooks.WINDOW)
@@ -177,7 +179,7 @@ class CommandHookWindow(Fixture):
             rec.unlink()
         inp = self.inp("Bash", {"command": "make"}, lines=lines, tu="tu-cli")
         p = subprocess.run([sys.executable, "-m", "rlo.hooks", "--model", str(model), "--mode", "enforce", "--grant", "Bash",
-                            "--now-ms", str(self.now), "--record", str(rec), *extra],
+                            "--now-ms", str(self.now), "--record", str(rec), "--no-incremental", *extra],
                            input=json.dumps(inp), capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         return json.loads(rec.read_text(encoding="utf-8").splitlines()[-1])

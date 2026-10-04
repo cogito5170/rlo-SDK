@@ -41,16 +41,20 @@
   DC · guard 에 간다(값만으로는 막지 않는다, BD-123 B2). D 는 상태를 모를 때(UNKNOWN · 없음)만 막는다. health_ttl=True 로 되돌린다.
 - **판정 기한**(CMD-K13 S7): 판정이 deadline_s(기본 120 초, 호스트 기본 600 초보다 훨씬 짧게) 안에 끝나지 않으면 enforce 에서
   막는다(닫는 쪽) -- 시간이 다 된 훅을 호스트는 막지 않고 지나가게 하기 때문이다. 선언된 통로 호출만은 지나간다.
-- **사건 창**(CMD-K14): Sensor 에는 최근 window 개(기본 WINDOW) L0 사건만 넣는다 -- 판정 한 번의 비용이 세션 길이와 함께 자라지
-  않게(Sensor 가 사건을 나눠 받을 수 있을 때까지). 대기 중인 호출과 그 응답은 창 밖이라도 둔다. 기록 줄에 window.
+- **이어 받기**(CMD-K14 S2, Sensor `extend` · `evaluate="once"`): transcript 마다 RunState 를 두고 새 사건만 넣는다. 처음 ·
+  다른 파일 · 지금 호출이 이미 들어 있으면 once(선형)로 새로 짓는다. 명령 훅은 부를 때마다 새 프로세스라 늘 once 다.
+  값은 전부 넣은 것과 같다. 설정이 이력에 기대면(Sensor 가 전부 다시 짓는다) **사건 창**(CMD-K14 S1)으로 간다: 최근 window 개
+  L0 사건만, 대기 중인 호출과 그 응답은 창 밖이라도 둔다. 기록 줄의 window 에 길(mode) · 넣은 수 · 버린 수.
 - 겨냥은 없다(None): Claude Code 도구에는 MS 세계의 실체가 없다. 결정 문맥은 모형의 도구를 모두 겨냥 없이 내놓는다(F4) --
   모형에 없는 도구는 A1 로 막힌다(enforce).
 """
 from __future__ import annotations
 
 import argparse
+import collections
 import dataclasses
 import json
+import os
 import sys
 import threading
 import time
@@ -63,7 +67,9 @@ POLICY = "rlo-hooks@1"
 PURPOSE = "agent_tool_call"
 HEALTH_STATES = ("execution_health", "tool_execution_health")    # 훅에서 TTL 을 두지 않는 상태(S6)
 DEADLINE_S = 120.0                                              # 판정 기한(S7). None 이면 기한 없음
-WINDOW = 400                                                    # Sensor 에 넣는 최근 L0 사건 수(CMD-K14). None 이면 전부
+WINDOW = 400                                                    # 대체 길의 사건 창(CMD-K14 S1). None 이면 전부
+CACHE_MAX = 8                                                   # 이어 받는 transcript 수(CMD-K14 S2, 오래된 것부터 버린다)
+HEAD_BYTES = 4096                                               # 같은 파일인가를 보는 머리 바이트
 # 낡음만으로 생긴 D 의 안내(정해진 글 하나). 읽기만 하는 호출(위험 등급 밖, D 가 보지 않는다)의 결과가 상태를 새로 관측한다
 STALE_HINT = (" -- hint: the decision state is stale, not unavailable; make one read-only tool call to refresh it, "
               "then retry")
@@ -103,6 +109,26 @@ def window_events(events, k) -> "tuple[list, int]":
     kept = [e for e in events[:cut] if id(e) in ids or (e["type"] == "llm.response" and e["data"].get("call_index") in calls)]
     out = kept + events[cut:]
     return out, len(events) - len(out)
+
+
+def file_identity(path) -> tuple:
+    """(장치, inode, 크기, 머리 바이트). 같은 transcript 가 자라기만 했나를 본다(CMD-K14 S2)."""
+    st = os.stat(path)
+    with open(path, "rb") as f:
+        head = f.read(HEAD_BYTES)
+    return st.st_dev, st.st_ino, st.st_size, head
+
+
+def same_transcript(old: tuple, new: tuple) -> bool:
+    """new 가 old 의 뒤에 덧붙기만 한 같은 파일인가: 같은 장치 · inode, 줄지 않음, 머리가 같다."""
+    return old[:2] == new[:2] and new[2] >= old[2] and new[3][:len(old[3])] == old[3]
+
+
+class _Cached:
+    __slots__ = ("ident", "rs", "ids")
+
+    def __init__(self, ident, rs, ids):
+        self.ident, self.rs, self.ids = ident, rs, ids
 
 
 def check_window(k):
@@ -151,12 +177,15 @@ class TranscriptJudge:
     substitutes  운영자의 대체표 {도구: [같은 목적의 도구, …]}(CMD-K11). A1 의 use_tool 대안이 여기서만 나온다
     channels     운영자의 통로 선언(CMD-K13, rlo.react.channels_of 의 꼴)
     health_ttl   False(기본): execution_health · tool_execution_health 에 TTL 을 두지 않는다(S6). True: Sensor 설정 그대로
-    window       Sensor 에 넣는 최근 L0 사건 수(CMD-K14, 기본 WINDOW). 대기 중인 tool.start 는 늘 둔다. None 이면 전부
+    window       대체 길(아래)에서 Sensor 에 넣는 최근 L0 사건 수(CMD-K14 S1, 기본 WINDOW). 대기 중인 호출은 늘 둔다. None 이면 전부
+    incremental  True(기본, CMD-K14 S2): Sensor 의 `extend` 로 이어 받는다 -- transcript 마다 RunState 를 두고 새 사건만 넣는다.
+                 처음 · 다른 파일이면 `evaluate="once"`(선형)로 짓는다. 값은 전부 넣은 것과 같다(Sensor 의 보장). 설정이 이력에
+                 기대면(Sensor 가 전부 다시 짓는 경우) 또는 False 면 사건 창(window)으로 간다
     """
 
     def __init__(self, model, *, grants=(), risky=None, purpose=PURPOSE, capabilities=None, sensor_config=None,
                  clock=None, policy: str = POLICY, substitutes=None, channels=None, health_ttl: bool = False,
-                 window: "int | None" = WINDOW):
+                 window: "int | None" = WINDOW, incremental: bool = True):
         from guard import GuardModel
         from guard.views import DEFAULT_RISKY
         try:
@@ -174,7 +203,43 @@ class TranscriptJudge:
         self.substitutes = {k: list(v) for k, v in (substitutes or {}).items()}
         self.channels = list(channels or [])             # CMD-K13: rlo.react.channels_of 의 꼴
         self.window = check_window(window)
-        self.last_window = None                          # (tool_use_id, {size, fed, dropped}) -- 마지막 거둠
+        self.incremental = incremental
+        self.last_window = None                          # (tool_use_id, {mode, size, fed, dropped}) -- 마지막 거둠
+        self._cache: "collections.OrderedDict[str, _Cached]" = collections.OrderedDict()
+        self._lock = threading.Lock()                    # 기한을 넘긴 판정이 아직 돌아도 캐시를 함께 고치지 않게
+
+    def can_extend(self) -> bool:
+        """이어 받기를 쓰나: 켜져 있고, Sensor 에 extend 가 있고, 설정이 이력에 기대지 않는다(Sensor 와 같은 조건)."""
+        if not self.incremental:
+            return False
+        try:
+            from llmsensor.run_state import RunState, _history_free
+            from llmsensor.state import DEFAULT_CONFIG
+        except ImportError:
+            return False
+        return hasattr(RunState, "extend") and _history_free(self.sensor_config or DEFAULT_CONFIG)
+
+    def _extended(self, path: str, events: list, current: set, kw: dict):
+        """(RunState, 길). 같은 transcript 가 자랐으면 extend, 아니면 once 로 새로 짓는다. 지금 호출의 사건이 이미 캐시에
+        들어 있으면(나란히 부른 앞 호출 때 들어감) 뺄 수 없으므로 새로 짓는다."""
+        from llmsensor.run_state import from_l0
+        key, ident = os.path.realpath(path), file_identity(path)
+        c = self._cache.get(key)
+        why = ("first" if c is None else "other_file" if not same_transcript(c.ident, ident)
+               else "current_seen" if current & c.ids else None)
+        if why is None:
+            c.rs.extend(events)
+            c.ident, mode = ident, c.rs.last_extend["mode"]
+            c.ids.update(e["id"] for e in events)
+            mode = "incremental" if mode in ("incremental", "unchanged") else mode
+        else:
+            c = self._cache[key] = _Cached(ident, from_l0(events, clock=self.clock, evaluate="once", **kw),
+                                           {e["id"] for e in events})
+            mode = f"once:{why}"
+        self._cache.move_to_end(key)
+        while len(self._cache) > CACHE_MAX:
+            self._cache.popitem(last=False)
+        return c.rs, mode
 
     def collect(self, input_data: dict, *, exclude_current: bool = False):
         """transcript -> L0 사건 -> Sensor RunState. (run_id, RunState). exclude_current 면 지금 호출을 뺀다(PreToolUse)."""
@@ -185,11 +250,20 @@ class TranscriptJudge:
             raise FileNotFoundError("transcript_path 가 없다")
         run = run_id_of(input_data)
         kw = {} if self.sensor_config is None else {"config": self.sensor_config}
+        tid = input_data.get("tool_use_id")
         events = from_cc_jsonl(path, run)
+        current: set = set()
         if exclude_current:
-            events = without_call(events, input_data.get("tool_use_id"))
+            kept = without_call(events, tid)
+            current = {e["id"] for e in events} - {e["id"] for e in kept}
+            events = kept
+        if self.can_extend():
+            with self._lock:
+                rs, mode = self._extended(path, events, current, kw)
+            self.last_window = (tid, {"mode": mode, "size": None, "fed": len(events), "dropped": 0})
+            return run, rs
         events, dropped = window_events(events, self.window)
-        self.last_window = (input_data.get("tool_use_id"), {"size": self.window, "fed": len(events), "dropped": dropped})
+        self.last_window = (tid, {"mode": "window", "size": self.window, "fed": len(events), "dropped": dropped})
         return run, from_l0(events, clock=self.clock, **kw)
 
     def view(self, input_data: dict):
@@ -403,7 +477,9 @@ def _parser():
     ap.add_argument("--health-ttl", action="store_true",
                     help="두 건강 상태에도 Sensor TTL 을 둔다(CMD-K13 S6 이전 동작 -- 재생 · 비교용)")
     ap.add_argument("--window", type=int, default=WINDOW,
-                    help=f"Sensor 에 넣는 최근 L0 사건 수(기본 {WINDOW}, CMD-K14). 대기 중인 호출은 늘 넣는다. 0 이면 전부")
+                    help=f"대체 길의 사건 창(기본 {WINDOW}, CMD-K14). 대기 중인 호출은 늘 넣는다. 0 이면 전부")
+    ap.add_argument("--no-incremental", action="store_true",
+                    help="Sensor 이어 받기(extend · once) 대신 사건 창으로 넣는다(CMD-K14 S1 동작 -- 비교용)")
     return ap
 
 
@@ -426,7 +502,8 @@ def _adapter_from_args(a, record=None) -> HookAdapter:
     clock = None if a.now_ms is None else (lambda now=a.now_ms: now)
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
                        clock=clock, substitutes=substitutes, channels=channels, health_ttl=a.health_ttl,
-                       window=a.window or None, deadline_s=a.deadline_s or None)
+                       window=a.window or None, incremental=not a.no_incremental,
+                       deadline_s=a.deadline_s or None)
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:

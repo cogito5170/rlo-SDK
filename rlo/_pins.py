@@ -1,7 +1,7 @@
 """판본 목록(manifest) -- SDK 가 고정하는 일곱 저장소의 커밋 sha. **이 파일이 원본이다**(BD-120 (3) · (4)).
 
 `pyproject.toml` 의 dependencies · optional-dependencies 는 이 목록과 글자까지 같아야 한다(tests/test_versions.py 가 붙든다).
-판은 CMD-K3 의 다시 고정이다: Telemetry `35e8119`(T18, Sensor 의 고정과 같다) · Sensor `97961e9`(S26) · MS `19d850e`(M27,
+판은 CMD-K3 의 다시 고정이다: Telemetry `35e8119`(T18, Sensor 의 고정과 같다) · Sensor `f1e45b5`(SEN1 · SEN2, CMD-K14 S2) · MS `19d850e`(M27,
 sha 없는 ms[sensor] 를 뺐다) · DC `526f2fb`(D18, 목적 agent_tool_call) · 나머지는 stage-3 그대로. 하나는 stage-3 머리와 다르다:
 
     action  stage-3 머리는 2f4791e 이지만 **3995fdb** 로 고정한다. MS · guard · health 가 모두 action 을 3995fdb 로 고정했고,
@@ -27,7 +27,7 @@ REQUIRED = {
 
 # extras 이름 -> {이름 -> (배포 이름, 저장소 URL, 커밋 sha)}
 EXTRAS = {
-    "sensor": {"sensor": ("llmsensor", _GH + "Sensor", "97961e98e6e55b87ea1bbb8483bb99269e5e3900")},
+    "sensor": {"sensor": ("llmsensor", _GH + "Sensor", "f1e45b5a6528b7a6e549e24b82be636caec15078")},
 }
 
 
