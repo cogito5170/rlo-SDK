@@ -1,6 +1,6 @@
 """`versions()` -- 고정 목록과 동결 계약 판본(BD-120 (4)). 공개 경계의 판본을 한곳에서 본다.
 
-    {"sdk": "rlo-sdk/0.8.2",                             판본 문자열(SDK.md §6). __version__ 은 "0.8.2"
+    {"sdk": "rlo-sdk/0.9.0",                             판본 문자열(SDK.md §6). __version__ 은 "0.9.0"
      "pins":      {이름: 커밋 sha}                      rlo/_pins.py 의 필수 고정
      "extras":    {extras: {이름: 커밋 sha}}            선택 설치의 고정
      "installed": {이름: 커밋 sha | None}               pip 가 실제로 받은 커밋(direct_url.json). git 이 아닌 설치 · 없으면 None
@@ -13,7 +13,7 @@ import json
 
 from . import _pins
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"
 
 # 동결 계약 -- 계약 이름 -> (모듈, 이름). 판본은 깔린 패키지에서 읽는다(SDK 가 다시 적지 않는다)
 CONTRACT_SOURCES = {
