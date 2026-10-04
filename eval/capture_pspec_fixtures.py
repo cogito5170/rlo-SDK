@@ -4,7 +4,7 @@
 
 글은 ga 의 코드 그대로 짓는다: `protocol(cfg)` 와 `Supervisor._prompt(rec)`(첫 턴 · --resume 턴 · --resume 없는 agy 턴).
 `_prompt` 는 가짜 self(설정 · 호스트의 resumes · 상태 · 결과 글)로 부른다 -- Supervisor 를 띄우지 않는다.
-사례 · 도구 표 · 작업 글은 baseline ops/pspec/run.py(b9e7669)의 것 그대로다.
+사례 · 도구 표 · 작업 글은 baseline ops/pspec/run.py(7dc9d13 -- 사례 17)의 것 그대로다.
 """
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ PLANS = [
     {"schema": "ga-gemini-plan/1", "steps": [{"id": "s%d" % i, "tool": "noop"} for i in range(16)]},
     {"schema": "ga-gemini-plan/1", "steps": [{"id": "a", "tool": "noop", "zz": 1}]},
     "not an object",
+    {"schema": "ga-gemini-plan/1", "steps": [{"id": "a", "tool": "noop", "after": ["a"]}]},   # 17 번째(BD-292 P1, run.py 7dc9d13)
 ]
 
 

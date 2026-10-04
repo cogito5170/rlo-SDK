@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.9.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.9.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -305,13 +305,16 @@ report = pspec.token_report(texts, usages, "gemini")         # 턴마다 추정(
 
 - **§4 의 바닥**은 `tests/test_pspec.py` 가 fixture(`tests/fixtures/pspec/ga_438a34a.json`, ga-sdk 438a34a 의 `protocol()` ·
   `Supervisor._prompt` · `check_plan` 에서 뜸 — `eval/capture_pspec_fixtures.py`)로 지킨다. rlo 는 ga 를 들이지 않는다:
-  verbatim 이 `protocol()` · 첫 턴 · `--resume` 턴 · agy 턴과 도구 표 셋에서 바이트 같다, `check` 가 `check_plan` 과 16/16 같다,
+  verbatim 이 `protocol()` · 첫 턴 · `--resume` 턴 · agy 턴과 도구 표 셋에서 바이트 같다, `check` 가 `check_plan` 과 17/17 같다(사례 17 은 BD-292),
   모르는 낱말 · 근거 · 빠진 입력은 오류, dict 순서는 글을 바꾸지 않는다, 8 턴 토큰 Gemini 646 → 447 · agy 2263 → 1574.
 - **대화**: `conversation(...)` 이 첫 턴은 `first`, 뒤 턴은 `turn`(--resume 으로 앞을 기억하는 호스트) 또는 `turn_noresume` 으로
   짓는다 — 기억하는 호스트에 once 구역을 다시 보내지 않는 판단은 여기 하나다.
 - **오류 위치**: 적재 · 템플릿 오류는 `SpecError(.line, .col, .source)`, 글은 `파일:줄:열: 까닭`. 구역 템플릿은 적재 때 한 번
   파싱해 둔다 — 모르는 태그 · 거르개 · 짝 없는 `end` · `v` 밖의 `c` · 없는 구역의 `use` · `use` 순환은 적재 오류다.
 - **거르개**: `json` · `cap:N` · `rstrip:"chars"` · `sort`. 인자 꼴은 적재 때 본다.
+- **BD-292(CMD-K16)**: `id seen` 은 앞 객체들의 id 만(자기를 가리키는 `after` 거부 — `check_plan` 과 17/17), `id new` 는
+  `let id` 에 통째로(fullmatch) 맞아야 한다(`"a\n"` 거부), 템플릿 이름은 입력 · `let` · `out` · `out_schema` · 반복 변수(와 그
+  속성)뿐 — 오타(`{{ tsk }}`)는 적재 오류(줄 · 열).
 - **타입 확장 규칙**: 타입은 문법이다 — baseline 이 PROMPT_SPEC §3 을 고친 뒤에만 더한다. rlo 에서는 `KINDS` 한 줄과 세 곳
   (`_P.atom` 파서 · `_sig` 서명 · `_check` 검사), 시험(읽기 · 서명 · 받음 · 거부)과 변이 하나. 이미 있는 명세의 글은 바이트 그대로.
 - **Telemetry**: `token_report(texts, usages, usage_format)` 는 부른 쪽이 넘긴 공급자 사용량을 Telemetry `l0_usage` 로 읽어

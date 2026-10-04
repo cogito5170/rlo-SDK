@@ -36,6 +36,10 @@
 거르개 · 짝 없는 end · 없는 구역을 쓰는 use · use 순환은 적재 오류). `c` 는 `v` 안에서만, `else` 는 for · if 안에서만 받는다.
 같은 이름의 in · let · 구역 · 칸이 두 번이면 오류. `[T] <= 이름` 의 이름은 정수 let 이어야, `key(이름)` 의 이름은 in 이어야 한다.
 compile 은 선언되지 않은 입력도 오류로 본다.
+
+**BD-292(CMD-K16)**: `id seen` 은 앞 객체들의 id 만 본다(객체의 `id new` 는 다른 칸 뒤에 등록) · `id new` 는 `let id` 정규식에
+통째로(fullmatch) 맞아야 한다 · 템플릿 이름은 입력 · let · out · out_schema · 반복 변수(와 그 속성)뿐, 그 밖은 적재 오류다.
+`{% use %}` 로 넣는 구역은 따로 검사한다 -- 부르는 쪽의 반복 변수를 쓰지 않는다.
 """
 from __future__ import annotations
 
@@ -401,7 +405,7 @@ def _check(spec, t: T, v, path, values, seen, out):
             out.append(path)
     elif k == "id_new":
         rx = spec.lets.get("id")
-        if not (isinstance(v, str) and (rx is None or rx.match(v))) or v in seen:
+        if not (isinstance(v, str) and (rx is None or rx.fullmatch(v))) or v in seen:       # 통째로 맞음(BD-292 P2)
             out.append(path)
         seen.append(v)
     elif k == "id_seen":
@@ -421,7 +425,8 @@ def _check(spec, t: T, v, path, values, seen, out):
         names = {f.name for f in t.arg}
         if set(v) - names:
             out.append(path + ".unknown_field")
-        for f in t.arg:
+        # id new 칸은 마지막에 -- 객체 안의 `id seen` 은 앞 객체들의 id 만 본다(BD-292 P1)
+        for f in sorted(t.arg, key=lambda f: f.type.kind == "id_new"):
             if f.name not in v:
                 if not f.optional:
                     out.append(f"{path}.{f.name}")
@@ -504,7 +509,15 @@ def _parse_section(spec: Spec, section: str) -> list:
     def err(msg, line, col):
         raise SpecError(f"section {section}: {msg}", line, col, spec.source)
 
-    def parse(i, stops, opener):
+    base = set(spec.inputs) | set(spec.lets) | {"out", "out_schema"}
+
+    def known(name, scope, line, col):
+        """템플릿 이름은 입력 · let · out · out_schema · 반복 변수(와 그 속성)뿐(BD-292 P3)."""
+        root = name.split(".")[0]
+        if root not in base and root not in scope:
+            err(f"unknown name {root!r} (not an input, let, out, out_schema or loop variable)", line, col)
+
+    def parse(i, stops, opener, scope=frozenset()):
         nodes = []
         while i < len(toks):
             t, line, col = toks[i]
@@ -521,20 +534,25 @@ def _parse_section(spec: Spec, section: str) -> list:
                         err(f"use: no section {' '.join(parts[1:])!r}", line, col)
                     nodes.append(_Node("use", tag, [], [], line, col, expr=parts[1]))
                 elif word in ("for", "if", "v"):
+                    inner_scope = scope
                     if word == "for":
                         m = _FOR.fullmatch(tag)
                         if not m:
                             err("for: expected `for <x> in <name>[|filter]`", line, col)
                         _filters(filter(None, m.group(3).split("|")), lambda msg: err(msg, line, col))
-                    elif word == "if" and not re.fullmatch(r"if [\w.]+", tag):
-                        err("if: expected `if <name>`", line, col)
+                        known(m.group(2), scope, line, col)
+                        inner_scope = scope | {m.group(1)}
+                    elif word == "if":
+                        if not re.fullmatch(r"if [\w.]+", tag):
+                            err("if: expected `if <name>`", line, col)
+                        known(tag.split()[1], scope, line, col)
                     elif word == "v" and tag != "v":
                         err("v: takes no argument", line, col)
                     inner = ("c", "end") if word == "v" else ("else", "end")
-                    body_, i, end = parse(i + 1, inner, (line, col))
+                    body_, i, end = parse(i + 1, inner, (line, col), inner_scope)
                     alt = []
                     if end in ("else", "c"):
-                        alt, i, end = parse(i + 1, ("end",), (line, col))
+                        alt, i, end = parse(i + 1, ("end",), (line, col), scope)    # for 의 else: 반복 변수가 없다
                     nodes.append(_Node(word, tag, body_, alt, line, col))
                 else:
                     err(f"unknown tag {tag!r}", line, col)
@@ -542,6 +560,7 @@ def _parse_section(spec: Spec, section: str) -> list:
                 parts = [p.strip() for p in t[2:-2].split("|")]
                 if not re.fullmatch(r"[\w.]+", parts[0]):
                     err(f"value: expected a name, got {parts[0]!r}", line, col)
+                known(parts[0], scope, line, col)
                 nodes.append(_Node("out", t, [], [], line, col, expr=parts[0],
                                    filters=_filters(parts[1:], lambda msg: err(msg, line, col))))
             else:

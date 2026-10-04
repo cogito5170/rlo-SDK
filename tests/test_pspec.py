@@ -46,8 +46,9 @@ class Floor(unittest.TestCase):
                     got = P.compile(SPEC, section, v)
                     self.assertEqual(got.encode("utf-8"), want.encode("utf-8"))
 
-    def test_check_agrees_with_check_plan_on_16_cases(self):
-        self.assertEqual(len(GA["plans"]), 16)
+    def test_check_agrees_with_check_plan_on_17_cases(self):
+        """run.py(7dc9d13) 의 사례 17: 처음 16 + 자기를 가리키는 after(BD-292 P1)."""
+        self.assertEqual(len(GA["plans"]), 17)
         for k, c in enumerate(GA["plans"]):
             with self.subTest(case=k):
                 self.assertEqual(bool(P.check(SPEC, c["plan"], {"tools": TOOLS})), bool(c["ga_problems"]))
@@ -165,6 +166,23 @@ class Checker(unittest.TestCase):
         self.assertEqual(self.ok({}), ["$.schema"])                                            # 빠진 칸
         self.assertEqual(self.ok("x"), ["$"])
 
+    def test_id_seen_is_earlier_objects_only(self):
+        """BD-292 P1: 객체의 id new 는 다른 칸 뒤에 등록된다 -- 자기를 가리키는 after 는 거부."""
+        self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": [{"id": "a", "tool": "noop", "after": ["a"]}]}),
+                         ["$.steps[0].after[0]"])
+        self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": [{"after": ["a"], "id": "a", "tool": "noop"}]}),
+                         ["$.steps[0].after[0]"])                       # 칸 차례와 상관없이
+        self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": [{"id": "a", "tool": "noop"},
+                                                                          {"id": "b", "tool": "noop", "after": ["a"]}]}), [])
+
+    def test_id_regex_is_a_fullmatch(self):
+        """BD-292 P2: "a\n" 은 `^...$` 에 match 로는 맞지만 통째로는 아니다."""
+        for bad in ("a\n", "a\nb", "a" * 13, ""):
+            with self.subTest(id=bad):
+                self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": [{"id": bad, "tool": "noop"}]}),
+                                 ["$.steps[0].id"])
+        self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": [{"id": "a" * 12, "tool": "noop"}]}), [])
+
     def test_list_bound_is_exact(self):
         steps = lambda n: [{"id": f"s{i}", "tool": "noop"} for i in range(n)]
         self.assertEqual(self.ok({"schema": "ga-gemini-plan/1", "steps": steps(16)}), [])
@@ -218,6 +236,18 @@ class Positions(unittest.TestCase):
         self.assertEqual(self.where(h + "x\n--- u\n{% end %}\n")[:2], (6, 1))
         with self.assertRaises(P.SpecError):
             P.load(h + "{% use u %}\n--- u\n{% use s %}\n")                 # use 순환
+
+    def test_unknown_template_names_are_load_errors(self):
+        """BD-292 P3: 입력 · let · out · out_schema · 반복 변수(와 그 속성) 밖의 이름은 적재 오류(줄 · 열)."""
+        h = "spec t/1\nin a : State @observed once\nlet n = 2\nout o/1\n  x : int\n--- s\n"
+        ok = P.load(h + "{{ a }} {{ a.b }} {{ n }} {{ out }} {{ out_schema }} {% for t in a %}{{ t.key }}{% end %}"
+                        "{% if a %}y{% end %}\n")
+        self.assertIn("s", ok.sections)
+        self.assertEqual(self.where(h + "x\nab {{ tsk }}\n")[:2], (8, 4))
+        self.assertEqual(self.where(h + "{% if tsk %}y{% end %}\n")[:2], (7, 1))
+        self.assertEqual(self.where(h + "{% for t in tsk %}y{% end %}\n")[:2], (7, 1))
+        self.assertEqual(self.where(h + "{% for t in a %}y{% end %}{{ t }}\n")[:2], (7, 27))       # 반복 밖의 반복 변수
+        self.assertEqual(self.where(h + "{% for t in a %}y{% else %}{{ t }}{% end %}\n")[:2], (7, 28))   # else 에는 없다
 
     def test_names_types_point_at(self):
         with self.assertRaises(P.SpecError):

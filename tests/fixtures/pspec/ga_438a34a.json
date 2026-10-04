@@ -331,6 +331,23 @@
     "plan: not an object"
    ],
    "plan": "not an object"
+  },
+  {
+   "ga_problems": [
+    "steps[0].after"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "after": [
+       "a"
+      ],
+      "id": "a",
+      "tool": "noop"
+     }
+    ]
+   }
   }
  ],
  "results": [
