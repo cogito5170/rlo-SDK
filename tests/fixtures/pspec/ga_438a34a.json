@@ -1,0 +1,402 @@
+{
+ "ask": "read the three hero notes and compare them",
+ "plans": [
+  {
+   "ga_problems": [],
+   "plan": {
+    "next": {
+     "after": [
+      "a"
+     ],
+     "prompt": "go"
+    },
+    "say": "hi",
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "args": {
+       "q": "x"
+      },
+      "id": "a",
+      "tool": "search"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [],
+   "plan": {
+    "next": null,
+    "schema": "ga-gemini-plan/1",
+    "steps": []
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[0].tool_not_in_table"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "a",
+      "tool": "nope"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "schema"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/2",
+    "steps": []
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[0].after"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "after": [
+       "b"
+      ],
+      "id": "a",
+      "tool": "search"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[1].id"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "a",
+      "tool": "search"
+     },
+     {
+      "id": "a",
+      "tool": "noop"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[0].id"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "this-id-is-too-long",
+      "tool": "noop"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[0].args"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "args": [],
+      "id": "a",
+      "tool": "noop"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "next"
+   ],
+   "plan": {
+    "next": {
+     "prompt": "  "
+    },
+    "schema": "ga-gemini-plan/1"
+   }
+  },
+  {
+   "ga_problems": [
+    "next.after"
+   ],
+   "plan": {
+    "next": {
+     "after": [
+      "z"
+     ],
+     "prompt": "x"
+    },
+    "schema": "ga-gemini-plan/1"
+   }
+  },
+  {
+   "ga_problems": [
+    "unknown_field"
+   ],
+   "plan": {
+    "extra": 1,
+    "schema": "ga-gemini-plan/1"
+   }
+  },
+  {
+   "ga_problems": [
+    "say"
+   ],
+   "plan": {
+    "say": 3,
+    "schema": "ga-gemini-plan/1"
+   }
+  },
+  {
+   "ga_problems": [
+    "steps"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "s0",
+      "tool": "noop"
+     },
+     {
+      "id": "s1",
+      "tool": "noop"
+     },
+     {
+      "id": "s2",
+      "tool": "noop"
+     },
+     {
+      "id": "s3",
+      "tool": "noop"
+     },
+     {
+      "id": "s4",
+      "tool": "noop"
+     },
+     {
+      "id": "s5",
+      "tool": "noop"
+     },
+     {
+      "id": "s6",
+      "tool": "noop"
+     },
+     {
+      "id": "s7",
+      "tool": "noop"
+     },
+     {
+      "id": "s8",
+      "tool": "noop"
+     },
+     {
+      "id": "s9",
+      "tool": "noop"
+     },
+     {
+      "id": "s10",
+      "tool": "noop"
+     },
+     {
+      "id": "s11",
+      "tool": "noop"
+     },
+     {
+      "id": "s12",
+      "tool": "noop"
+     },
+     {
+      "id": "s13",
+      "tool": "noop"
+     },
+     {
+      "id": "s14",
+      "tool": "noop"
+     },
+     {
+      "id": "s15",
+      "tool": "noop"
+     },
+     {
+      "id": "s16",
+      "tool": "noop"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "s0",
+      "tool": "noop"
+     },
+     {
+      "id": "s1",
+      "tool": "noop"
+     },
+     {
+      "id": "s2",
+      "tool": "noop"
+     },
+     {
+      "id": "s3",
+      "tool": "noop"
+     },
+     {
+      "id": "s4",
+      "tool": "noop"
+     },
+     {
+      "id": "s5",
+      "tool": "noop"
+     },
+     {
+      "id": "s6",
+      "tool": "noop"
+     },
+     {
+      "id": "s7",
+      "tool": "noop"
+     },
+     {
+      "id": "s8",
+      "tool": "noop"
+     },
+     {
+      "id": "s9",
+      "tool": "noop"
+     },
+     {
+      "id": "s10",
+      "tool": "noop"
+     },
+     {
+      "id": "s11",
+      "tool": "noop"
+     },
+     {
+      "id": "s12",
+      "tool": "noop"
+     },
+     {
+      "id": "s13",
+      "tool": "noop"
+     },
+     {
+      "id": "s14",
+      "tool": "noop"
+     },
+     {
+      "id": "s15",
+      "tool": "noop"
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "steps[0]"
+   ],
+   "plan": {
+    "schema": "ga-gemini-plan/1",
+    "steps": [
+     {
+      "id": "a",
+      "tool": "noop",
+      "zz": 1
+     }
+    ]
+   }
+  },
+  {
+   "ga_problems": [
+    "plan: not an object"
+   ],
+   "plan": "not an object"
+  }
+ ],
+ "results": [
+  {
+   "id": "a",
+   "text": "3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md",
+   "tool": "search"
+  },
+  {
+   "id": "b",
+   "text": "notes/: hero-v1.md hero-v2.md hero-v3.md footer.md",
+   "tool": "list_dir"
+  }
+ ],
+ "source": {
+  "functions": [
+   "ga.gemini.protocol",
+   "ga.gemini.Supervisor._prompt",
+   "ga.gemini.check_plan"
+  ],
+  "repo": "cogito5170/ga-sdk",
+  "sha": "438a34a26d203ee7616409b50811d227f6297499"
+ },
+ "tables": {
+  "blank_about": {
+   "first": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `x`\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.",
+   "protocol": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `x`\n",
+   "tools": {
+    "x": {
+     "about": ""
+    }
+   },
+   "turn": "Reply with one ga-gemini-plan/1 JSON object, as before.\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them",
+   "turn_noresume": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `x`\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.\n\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them"
+  },
+  "empty": {
+   "first": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- (none)\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.",
+   "protocol": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- (none)\n",
+   "tools": {},
+   "turn": "Reply with one ga-gemini-plan/1 JSON object, as before.\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them",
+   "turn_noresume": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- (none)\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.\n\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them"
+  },
+  "six": {
+   "first": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `fetch_url`: fetch a url as text\n- `list_dir`: list a directory\n- `noop`\n- `read_file`: read a file from the workspace\n- `search`: search the web; returns titles and urls\n- `write_note`: append a note to the user's notes\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.",
+   "protocol": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `fetch_url`: fetch a url as text\n- `list_dir`: list a directory\n- `noop`\n- `read_file`: read a file from the workspace\n- `search`: search the web; returns titles and urls\n- `write_note`: append a note to the user's notes\n",
+   "tools": {
+    "fetch_url": {
+     "about": "fetch a url as text"
+    },
+    "list_dir": {
+     "about": "list a directory"
+    },
+    "noop": {},
+    "read_file": {
+     "about": "read a file from the workspace"
+    },
+    "search": {
+     "about": "search the web; returns titles and urls"
+    },
+    "write_note": {
+     "about": "append a note to the user's notes"
+    }
+   },
+   "turn": "Reply with one ga-gemini-plan/1 JSON object, as before.\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them",
+   "turn_noresume": "You are directing a controller. You do not call tools yourself. Answer every turn with exactly one JSON object in a ```json fenced block, of this form:\n{\"schema\": \"ga-gemini-plan/1\", \"steps\": [{\"id\": \"a\", \"tool\": \"<name>\", \"args\": {}, \"after\": []}], \"next\": {\"prompt\": \"<what you will do with the results>\", \"after\": [\"a\"]} or null, \"say\": \"<short note for the user>\"}\nRules: at most 16 steps; ids are short labels; `after` names earlier ids of the same answer; steps without `after` between them run at once; `next` is your one next turn and gets the results of the steps it lists; set `next` to null when the task is done.\nTools (closed list):\n- `fetch_url`: fetch a url as text\n- `list_dir`: list a directory\n- `noop`\n- `read_file`: read a file from the workspace\n- `search`: search the web; returns titles and urls\n- `write_note`: append a note to the user's notes\n\nTask:\nFind the three most recent design notes about the hero banner and summarise what changed between them.\n\nResults:\n- a (search): 3 hits: notes/hero-v1.md, notes/hero-v2.md, notes/hero-v3.md\n- b (list_dir): notes/: hero-v1.md hero-v2.md hero-v3.md footer.md\n\nYour next step: read the three hero notes and compare them"
+  }
+ },
+ "task": "Find the three most recent design notes about the hero banner and summarise what changed between them."
+}

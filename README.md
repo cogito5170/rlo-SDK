@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.8.2", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.9.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -285,6 +285,39 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)
   창이 열릴 때까지 한 번 잔다(`governor_sleep`, 90 초 넘는 대기 · 429 세 번 넘으면 미룸).
+
+## 프롬프트 언어 — prompt-spec/1 (CMD-K15, baseline PROMPT_SPEC.md b9e7669)
+
+손으로 쓴 `str.format` 프롬프트 대신 뜻을 선언한 파일 하나(`*.pspec`)에서 세 가지를 낸다: 프롬프트 글(`verbatim` = 지금 글과
+바이트 같음 · `compact` = 토큰을 줄인 글), 같은 `out` 선언에서 나온 출력 검사기, 토큰 보고. **문법은 baseline 의 것**이다
+(PROMPT_SPEC.md §1-§3, 원형 `ops/pspec/pspec.py`). rlo 는 제품판을 짓는다(§5): 시험 · 변이 · 오류 위치 · 거르개 · 타입 확장 규칙 ·
+Telemetry · 판본 · 성능. 모형을 부르지 않는다(공급자 SDK · 네트워크 · 키 없음).
+
+```python
+from rlo import pspec
+
+spec = pspec.load_file("gemini-plan.pspec")                 # 꼴 오류는 SpecError("gemini-plan.pspec:12:7: ...")
+first = pspec.compile(spec, "first", {"tools": tools, "task": task, "results": [], "ask": ""}, "compact")
+problems = pspec.check(spec, pspec.parse_answer(answer), {"tools": tools})   # [] 이면 받는다; 또는 check_text(spec, answer, …)
+texts = pspec.conversation(spec, first_values, turn_values, "compact", resumes=True)   # 첫 턴 + 뒤 턴들
+report = pspec.token_report(texts, usages, "gemini")         # 턴마다 추정(ceil(바이트/4)) 과 공급자 사용량(Telemetry) 나란히
+```
+
+- **§4 의 바닥**은 `tests/test_pspec.py` 가 fixture(`tests/fixtures/pspec/ga_438a34a.json`, ga-sdk 438a34a 의 `protocol()` ·
+  `Supervisor._prompt` · `check_plan` 에서 뜸 — `eval/capture_pspec_fixtures.py`)로 지킨다. rlo 는 ga 를 들이지 않는다:
+  verbatim 이 `protocol()` · 첫 턴 · `--resume` 턴 · agy 턴과 도구 표 셋에서 바이트 같다, `check` 가 `check_plan` 과 16/16 같다,
+  모르는 낱말 · 근거 · 빠진 입력은 오류, dict 순서는 글을 바꾸지 않는다, 8 턴 토큰 Gemini 646 → 447 · agy 2263 → 1574.
+- **대화**: `conversation(...)` 이 첫 턴은 `first`, 뒤 턴은 `turn`(--resume 으로 앞을 기억하는 호스트) 또는 `turn_noresume` 으로
+  짓는다 — 기억하는 호스트에 once 구역을 다시 보내지 않는 판단은 여기 하나다.
+- **오류 위치**: 적재 · 템플릿 오류는 `SpecError(.line, .col, .source)`, 글은 `파일:줄:열: 까닭`. 구역 템플릿은 적재 때 한 번
+  파싱해 둔다 — 모르는 태그 · 거르개 · 짝 없는 `end` · `v` 밖의 `c` · 없는 구역의 `use` · `use` 순환은 적재 오류다.
+- **거르개**: `json` · `cap:N` · `rstrip:"chars"` · `sort`. 인자 꼴은 적재 때 본다.
+- **타입 확장 규칙**: 타입은 문법이다 — baseline 이 PROMPT_SPEC §3 을 고친 뒤에만 더한다. rlo 에서는 `KINDS` 한 줄과 세 곳
+  (`_P.atom` 파서 · `_sig` 서명 · `_check` 검사), 시험(읽기 · 서명 · 받음 · 거부)과 변이 하나. 이미 있는 명세의 글은 바이트 그대로.
+- **Telemetry**: `token_report(texts, usages, usage_format)` 는 부른 쪽이 넘긴 공급자 사용량을 Telemetry `l0_usage` 로 읽어
+  턴마다 `provider`(input · cache · output 토큰, `prompt_tokens` = 보낸 쪽 합)를 추정 옆에 둔다.
+- **판본**: 언어 `pspec.LANGUAGE = "prompt-spec/1"`, 명세의 `spec <name>/<n>` → `Spec.version`, `Spec.digest`(파일 sha256).
+- **성능**: 템플릿은 적재 때 파싱해 두고, 한 턴 컴파일 + 검사는 0.1 ms 안팎(시험 한도 10 ms).
 
 ## 기록을 읽는 도구 둘
 
