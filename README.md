@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.9.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.10.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -285,6 +285,33 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)
   창이 열릴 때까지 한 번 잔다(`governor_sleep`, 90 초 넘는 대기 · 429 세 번 넘으면 미룸).
+
+## 컨텍스트 예산 — context-budget/1 (CMD-K17, BD-296)
+
+긴 자율 세션은 모형을 부를 때마다 쌓인 대화 전체를 다시 읽는다(캐시 읽기) — 토큰은 '컨텍스트 크기 × 호출 수' 로 는다.
+rlo 훅의 PreToolUse 가 가드 판정 **앞에서** 컨텍스트를 재고(transcript 꼬리의 마지막 주 사슬 assistant `usage`:
+input + cache_read + cache_creation), 예산을 넘으면 세션이 상태를 남기고 차례를 끝내게 한다(baseline CONTEXT_BUDGET.md · 원형
+`ops/ctxbudget/`).
+
+| 단계 | 조건 | enforce 의 출력 |
+|---|---|---|
+| ok | ctx < soft | 없음 |
+| warn | soft ≤ ctx < hard | `additionalContext`: 지금 단계만 끝내고 상태 파일을 쓰고 commit · push 한 뒤 차례를 끝내라 |
+| checkpoint | ctx ≥ hard | checkpoint 도구(상태 파일 Write/Edit · `cd` · `git add/commit/push/status` 만 있는 Bash)가 아니면 `deny` + 까닭; checkpoint 도구면 알림만 |
+| unknown | usage 를 못 읽음 | 없음 — 모름은 0 도, 예산 넘음도 아니다(기록만) |
+
+- **기본 예산은 없다**(BD-289): `guard_hooks(..., context_budget={"soft": 150_000, "hard": 200_000, "state_paths": ["STATE.md"],
+  "mode": "shadow"})` 또는 명령 훅 `--budget-soft N --budget-hard N [--budget-state PATH] [--budget-mode shadow|enforce]`.
+  설정이 없으면 이 단계는 없다. 모드 기본은 **shadow**(기록만, 아무것도 바꾸지 않음) — 가드 모드(`--mode`)와 따로다.
+- **가드의 deny 가 늘 이긴다**: 예산은 막기만 한다. hard 를 넘은 non-checkpoint 호출은 가드를 묻지 않고 막고, 나머지는 가드
+  판정 뒤 가드가 막으면 그대로, 아니면 알림(`additionalContext`)을 붙인다. 예산은 `permissionDecision: "allow"` 를 내지 않는다
+  (allow 는 Claude Code 의 권한 확인을 건너뛴다 — 허락은 가드 · 사용자 설정의 몫).
+- **checkpoint Bash** 는 `&&` · `;` · 줄바꿈으로 나눈 조각이 모두 `cd <dir>` 또는 `git [-C dir] add|commit|push|status …` 이고
+  `` ` `` · `$(` · `${` · `|` · `>` · `<` · 홑 `&` 가 없어야 한다. 상태 파일은 경로가 같거나 `/<이름>` 으로 끝나야 한다.
+- **기록**: 결정마다 `--record` 에 `context_budget {stage, ctx, soft, hard, tool_name, mode, enforced, denied}` 한 줄.
+- **비용**: transcript 는 꼬리(256 KiB, 못 찾으면 두 배씩)만 읽는다 — 100 MB 에서도 수 ms.
+- **고르기(오프라인)**: `python -m rlo.ctxbudget simulate (--l0 L0.jsonl | --cc transcript.jsonl) --soft N --hard N
+  [--reset-to N]` 이 기록된 세션의 호출별 컨텍스트로 '예산이 있었다면' 을 추정한다(원형의 `simulate`, L1).
 
 ## 프롬프트 언어 — prompt-spec/1 (CMD-K15, baseline PROMPT_SPEC.md b9e7669)
 

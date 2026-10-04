@@ -295,7 +295,7 @@ class DeadlineExceeded(RuntimeError):
 
 class HookAdapter:
     def __init__(self, judge, *, mode: str = SHADOW, record=None, observe=None, collected=None,
-                 deadline_s: "float | None" = None):
+                 deadline_s: "float | None" = None, context_budget=None):
         """judge(input_data, mode) -> (ActionIntent, ValidationResult, GuardResult, DCView) · 거두기는 judge.collect 가 있으면.
         record(kind, dict) 기록(없으면 버림) · observe(input_data) 실행 뒤 관측(없으면 버림) ·
         collected(event, run_id, run_state) Stop · SessionEnd 에서 거둔 상태(없으면 버림)."""
@@ -306,6 +306,8 @@ class HookAdapter:
         self.observe = observe or (lambda d: None)
         self.collected = collected or (lambda ev, run, rs: None)
         self.deadline_s = deadline_s             # 판정 기한(초). None · 0 이면 기한 없음
+        from .ctxbudget import Budget
+        self.budget = Budget.of(context_budget)  # CMD-K17: 컨텍스트 예산(없으면 꺼짐 -- 기본 예산은 없다)
 
     def react_for(self, input_data: dict, rule: str, cause: str, tool=None, dcv=None, stale=False) -> dict:
         """닫힌 대안(CMD-K11). 되풀이는 transcript 의 같은 거부로 센다 -- 읽지 못하면 첫 번째로 본다.
@@ -353,6 +355,32 @@ class HookAdapter:
         return deny(f"rlo hook deadline exceeded ({self.deadline_s:g}s)" + R.line(obj)) if self.mode == ENFORCE else {}
 
     def pre_tool_use(self, input_data: dict) -> dict:
+        """컨텍스트 예산(있으면) 다음 가드 판정. 가드의 deny 가 늘 이긴다 -- 예산은 deny 를 allow 로 바꾸지 않는다."""
+        if self.budget is None:
+            return self._guard_pre_tool_use(input_data)
+        from . import ctxbudget as CB
+        b = self.budget
+        try:
+            ctx = CB.context_tokens(input_data["transcript_path"])
+            stage, out = CB.decide(ctx, input_data.get("tool_name"), input_data.get("tool_input"), b)
+        except Exception as e:                     # 예산이 고장 나도 가드는 돈다(모름처럼)
+            ctx, stage, out = None, "unknown", {}
+            self.record("context_budget_error", {"tool_use_id": input_data.get("tool_use_id"), "exception": type(e).__name__})
+        denies = out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+        self.record("context_budget", {"tool_use_id": input_data.get("tool_use_id"), "tool_name": input_data.get("tool_name"),
+                                       "stage": stage, "ctx": ctx, "soft": b.soft, "hard": b.hard, "mode": b.mode,
+                                       "enforced": b.mode == "enforce" and bool(out), "denied": b.mode == "enforce" and denies})
+        if b.mode == "enforce" and denies:
+            return out                             # hard 를 넘었고 checkpoint 도구가 아니다 -- 가드를 물을 것도 없다
+        guard = self._guard_pre_tool_use(input_data)
+        if guard.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" or b.mode != "enforce" or not out:
+            return guard                           # 가드의 deny 가 이긴다 · shadow 는 아무것도 바꾸지 않는다
+        add = out["hookSpecificOutput"]["additionalContext"]
+        h = dict(guard.get("hookSpecificOutput", {}), hookEventName=PRE)
+        h["additionalContext"] = (h["additionalContext"] + "\n" + add) if h.get("additionalContext") else add
+        return {"hookSpecificOutput": h}
+
+    def _guard_pre_tool_use(self, input_data: dict) -> dict:
         try:
             try:
                 it, v, res, dcv = self._judged(input_data)
@@ -425,11 +453,12 @@ class HookAdapter:
 
 
 def guard_hooks(model, *, mode: str = SHADOW, record=None, observe=None, collected=None,
-                deadline_s: "float | None" = DEADLINE_S, **judge_kw) -> HookAdapter:
+                deadline_s: "float | None" = DEADLINE_S, context_budget=None, **judge_kw) -> HookAdapter:
     """한 줄로: transcript 판정을 단 훅 어댑터. judge_kw 는 `TranscriptJudge` 의 인자(grants · purpose · …).
-    deadline_s: 판정 기한(초, 기본 120). None 이면 기한 없음."""
+    deadline_s: 판정 기한(초, 기본 120). None 이면 기한 없음.
+    context_budget: CMD-K17 컨텍스트 예산 {soft, hard, state_paths?, mode?}(mode 기본 shadow). None 이면 꺼짐."""
     return HookAdapter(TranscriptJudge(model, **judge_kw), mode=mode, record=record, observe=observe,
-                       collected=collected, deadline_s=deadline_s)
+                       collected=collected, deadline_s=deadline_s, context_budget=context_budget)
 
 
 def deny(reason: str) -> dict:
@@ -478,6 +507,11 @@ def _parser():
                     help="두 건강 상태에도 Sensor TTL 을 둔다(CMD-K13 S6 이전 동작 -- 재생 · 비교용)")
     ap.add_argument("--window", type=int, default=WINDOW,
                     help=f"대체 길의 사건 창(기본 {WINDOW}, CMD-K14). 대기 중인 호출은 늘 넣는다. 0 이면 전부")
+    ap.add_argument("--budget-soft", type=int, default=None, help="컨텍스트 예산 soft(토큰, CMD-K17). soft · hard 가 없으면 꺼짐")
+    ap.add_argument("--budget-hard", type=int, default=None, help="컨텍스트 예산 hard(토큰)")
+    ap.add_argument("--budget-state", action="append", default=[], help="checkpoint 로 쓸 상태 파일(되풀이, 기본 STATE.md)")
+    ap.add_argument("--budget-mode", default="shadow", choices=("shadow", "enforce"),
+                    help="예산 모드(기본 shadow -- 기록만). 가드 모드(--mode)와 따로다")
     ap.add_argument("--no-incremental", action="store_true",
                     help="Sensor 이어 받기(extend · once) 대신 사건 창으로 넣는다(CMD-K14 S1 동작 -- 비교용)")
     return ap
@@ -503,7 +537,18 @@ def _adapter_from_args(a, record=None) -> HookAdapter:
     return guard_hooks(model, mode=a.mode, record=record, grants=a.grant, purpose=a.purpose, sensor_config=cfg,
                        clock=clock, substitutes=substitutes, channels=channels, health_ttl=a.health_ttl,
                        window=a.window or None, incremental=not a.no_incremental,
-                       deadline_s=a.deadline_s or None)
+                       deadline_s=a.deadline_s or None, context_budget=_budget_from_args(a))
+
+
+def _budget_from_args(a):
+    if a.budget_soft is None and a.budget_hard is None:
+        if a.budget_state or a.budget_mode != "shadow":
+            raise ValueError("--budget-state / --budget-mode need --budget-soft and --budget-hard")
+        return None                                # 기본 예산은 없다(BD-289)
+    if a.budget_soft is None or a.budget_hard is None:
+        raise ValueError("context budget needs both --budget-soft and --budget-hard")
+    return {"soft": a.budget_soft, "hard": a.budget_hard, "state_paths": a.budget_state or ["STATE.md"],
+            "mode": a.budget_mode}
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:
