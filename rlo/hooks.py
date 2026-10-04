@@ -373,12 +373,9 @@ class HookAdapter:
         if b.mode == "enforce" and denies:
             return out                             # hard 를 넘었고 checkpoint 도구가 아니다 -- 가드를 물을 것도 없다
         guard = self._guard_pre_tool_use(input_data)
-        if guard.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" or b.mode != "enforce" or not out:
-            return guard                           # 가드의 deny 가 이긴다 · shadow 는 아무것도 바꾸지 않는다
-        add = out["hookSpecificOutput"]["additionalContext"]
-        h = dict(guard.get("hookSpecificOutput", {}), hookEventName=PRE)
-        h["additionalContext"] = (h["additionalContext"] + "\n" + add) if h.get("additionalContext") else add
-        return {"hookSpecificOutput": h}
+        if guard or b.mode != "enforce" or not out:
+            return guard                           # 가드가 무엇이든 내면(deny) 가드가 이긴다 · shadow 는 아무것도 바꾸지 않는다
+        return out                                 # 가드가 막지 않았다 -- 예산의 알림(additionalContext)만, allow 는 없다
 
     def _guard_pre_tool_use(self, input_data: dict) -> dict:
         try:
