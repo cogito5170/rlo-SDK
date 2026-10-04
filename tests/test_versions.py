@@ -98,7 +98,7 @@ class Manifest(unittest.TestCase):
     def test_versions_gives_the_pins(self):
         v = rlo.versions()
         self.assertEqual(v["sdk"], f"rlo-sdk/{rlo.__version__}")
-        self.assertEqual(rlo.__version__, "0.11.0")
+        self.assertEqual(rlo.__version__, "0.11.1")
         self.assertEqual(v["pins"], {k: p[2] for k, p in _pins.REQUIRED.items()})
         self.assertEqual(v["extras"], {"sensor": {"sensor": _pins.EXTRAS["sensor"]["sensor"][2]}})
         self.assertEqual(rlo.Autonomy.versions(), v)                      # 입구에서도 같은 것을 본다
@@ -142,8 +142,8 @@ class Manifest(unittest.TestCase):
 
     def test_both_normalizers_agree(self):
         """packaging 이 있든 없든 같은 비교 꼴 -- 빈 venv 에 packaging 이 없을 수 있다."""
-        cases = ["action-contract @ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
-                 "Action_Contract@ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
+        cases = ["action-contract @ git+https://github.com/cogito5170/action@9d6729fc6809d68d2b5d55b4ad2fd37e5281d998",
+                 "Action_Contract@ git+https://github.com/cogito5170/action@9d6729fc6809d68d2b5d55b4ad2fd37e5281d998",
                  'llmsensor @ git+https://github.com/cogito5170/Sensor@97961e9 ; extra == "sensor"',
                  "llmsensor@ git+https://github.com/cogito5170/Sensor@97961e9 ; extra=='sensor'"]   # url 뒤 ';' 앞 빈칸은 PEP 508
         plain = [_req_plain(c) for c in cases]

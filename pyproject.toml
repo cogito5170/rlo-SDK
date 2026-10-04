@@ -4,24 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlo-sdk"
-version = "0.11.0"
+version = "0.11.1"
 description = "rlo SDK -- 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 한 입구로 묶는다"
 readme = "README.md"
 requires-python = ">=3.10"
 # 판본 목록의 원본은 rlo/_pins.py 다. 이 목록은 그것과 글자까지 같아야 한다(tests/test_versions.py).
 # guard · health 는 필수다(BD-120 (3)): 선택이면 설치에 따라 MS 런타임의 행동이 조용히 바뀐다.
-# action 은 3995fdb 다(stage-3 머리 2f4791e 와 패키지 코드가 같다 -- 까닭은 rlo/_pins.py).
+# action 은 9d6729f 다(stage-3 머리 2f4791e 와 패키지 코드가 같다 -- 까닭은 rlo/_pins.py).
 dependencies = [
-    "l0-telemetry @ git+https://github.com/cogito5170/Telemetry@35e8119968758becae94f226ce9ee0168967086e",
-    "dc @ git+https://github.com/cogito5170/DC@526f2fb487934d1d5c1a930f54ea65de493f34cb",
-    "ms @ git+https://github.com/cogito5170/MS@19d850e978f83853edca3ebefdf5c362906ee44c",
-    "action-contract @ git+https://github.com/cogito5170/action@3995fdb3ba487f31d841d3e11b710e64f0d523db",
+    "l0-telemetry @ git+https://github.com/cogito5170/Telemetry@f6c7ae26d336965d3558092517e97d37d222c4ea",
+    "dc @ git+https://github.com/cogito5170/DC@7e0ac1494192e49ab03c687c79f7156cb38abcec",
+    "ms @ git+https://github.com/cogito5170/MS@1f1018e0348428c9b83af4f6679659f0057e3f4b",
+    "action-contract @ git+https://github.com/cogito5170/action@9d6729fc6809d68d2b5d55b4ad2fd37e5281d998",
     "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",
     "health @ git+https://github.com/cogito5170/health@afcff3960694f58978afec2cdde62cac9e27830f",
 ]
 
 [project.optional-dependencies]
-sensor = ["llmsensor @ git+https://github.com/cogito5170/Sensor@f1e45b5a6528b7a6e549e24b82be636caec15078"]
+sensor = ["llmsensor @ git+https://github.com/cogito5170/Sensor@ff17bddfd24f6d8cf9c14c0c45107b53818dd26a"]
 
 [tool.setuptools]
 packages = ["rlo", "rlo.suggest_model"]

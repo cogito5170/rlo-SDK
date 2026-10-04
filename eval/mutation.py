@@ -13,8 +13,8 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TEL = "35e8119968758becae94f226ce9ee0168967086e"
-ACT, ACT_HEAD = "3995fdb3ba487f31d841d3e11b710e64f0d523db", "2f4791e5c33df6cf19d41f139d95d74e4b86b42e"
+TEL = "f6c7ae26d336965d3558092517e97d37d222c4ea"
+ACT, ACT_HEAD = "9d6729fc6809d68d2b5d55b4ad2fd37e5281d998", "2f4791e5c33df6cf19d41f139d95d74e4b86b42e"
 GUARD_REQ = '    "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",\n'
 GUARD_PIN = '    "guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c"),\n'
 
@@ -92,7 +92,7 @@ MUTANTS = [
     ("둘 다: action 을 stage-3 머리 2f4791e 로", [("rlo/_pins.py", ACT, ACT_HEAD), ("pyproject.toml", ACT, ACT_HEAD)]),
     ("versions: installed 가 고정 목록을 베낌", [("rlo/versions.py", '"installed": {name: _installed_commit(pin[0])', '"installed": {name: pin[2]')]),
     ("versions: 계약 판본을 잘못 읽음", [("rlo/versions.py", '("guard.forms", "GUARD_SCHEMA")', '("guard.forms", "VALIDATION_SCHEMA")')]),
-    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.11.0"', '__version__ = "0.11.1"')]),
+    ("versions: SDK 판본이 pyproject 와 어긋남", [("rlo/versions.py", '__version__ = "0.11.1"', '__version__ = "0.11.2"')]),
     # 꼴이 틀린 입력(CMD-K10 S1)
     ("hooks: 꼴이 틀린 입력을 enforce 에서도 허락", [("rlo/hooks.py",
         'return deny(f"rlo hook input error: {problem}" + R.line(obj)) if self.mode == ENFORCE else {}',

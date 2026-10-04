@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.11.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.11.1", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -72,13 +72,13 @@ MS 의 sha 없는 `ms[sensor]` extras 는 `rlo-sdk[sensor]` 와 함께 깔면 �
 
 | 저장소 | 배포 | sha | |
 |---|---|---|---|
-| Telemetry | `l0-telemetry` | `35e8119` | 필수 (T18 `tool.start.tool_use_id`) |
-| DC | `dc` | `526f2fb` | 필수 (D18 목적 `agent_tool_call`) |
-| MS | `ms` | `19d850e` | 필수 (M26 `risky=` · M27 sha 없는 `ms[sensor]` 를 뺐다) |
-| action | `action-contract` | `3995fdb` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `3995fdb` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
+| Telemetry | `l0-telemetry` | `f6c7ae2` | 필수 (T18 `tool.start.tool_use_id`) |
+| DC | `dc` | `7e0ac14` | 필수 (D18 목적 `agent_tool_call`) |
+| MS | `ms` | `1f1018e` | 필수 (M26 `risky=` · M27 sha 없는 `ms[sensor]` 를 뺐다) |
+| action | `action-contract` | `9d6729f` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `9d6729f` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
 | guard | `guard` | `be871b9` | 필수 |
 | health | `health` | `afcff39` | 필수 |
-| Sensor | `llmsensor` | `f1e45b5` | `[sensor]`. SEN1 · SEN2 — 이어 받기(`RunState.extend`) · `evaluate="once"`, Telemetry 고정은 `35e8119` 그대로 |
+| Sensor | `llmsensor` | `ff17bdd` | `[sensor]`. SEN1 · SEN2 — 이어 받기(`RunState.extend`) · `evaluate="once"`, Telemetry 고정은 `f6c7ae2`(0.2.1) |
 
 ## 시험
 
