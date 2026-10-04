@@ -675,25 +675,38 @@ def conversation(spec: Spec, first_values: dict, turns: list, mode: str = "verba
 
 
 def usage_report(usage: "dict | None", usage_format: "str | None") -> "dict | None":
-    """공급자가 보고한 사용량 -> Telemetry L0 칸(input_tokens · cache_read_input_tokens · output_tokens …). 없으면 None."""
+    """공급자가 보고한 사용량 -> 그 usage 꼴(rlo.usage 플러그인, 기본 제공은 Telemetry l0_usage)로 맞춘 칸. 없으면 None.
+    {format, input, cache_read, cache_creation, output, context} 와, 앞 판과 같은 이름(input_tokens · cache_read_input_tokens ·
+    cache_creation_input_tokens · output_tokens · prompt_tokens = context)."""
     if usage is None or usage_format is None:
         return None
-    from telemetry.usage import l0_usage
-    vals, _ = l0_usage(usage_format, usage)
-    sent = [vals.get(k) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")]
-    return dict(vals, prompt_tokens=sum(x for x in sent if x is not None) if any(x is not None for x in sent) else None)
+    from . import plugins
+    n = plugins.get("rlo.usage", usage_format).normalize(usage) or {}
+    return {"format": usage_format, **{k: n.get(k) for k in ("input", "cache_read", "cache_creation", "output", "context")},
+            "input_tokens": n.get("input"), "cache_read_input_tokens": n.get("cache_read"),
+            "cache_creation_input_tokens": n.get("cache_creation"), "output_tokens": n.get("output"),
+            "prompt_tokens": n.get("context")}
 
 
-def token_report(texts: "list[str]", usages: "list | None" = None, usage_format: "str | None" = None) -> dict:
-    """턴마다 오프라인 추정과, 부른 쪽이 넘긴 공급자 사용량(Telemetry 로 읽음)을 나란히. 합계도."""
+def token_report(texts: "list[str]", usages: "list | None" = None, usage_format: "str | None" = None,
+                 tokenizer: "str | None" = None) -> dict:
+    """턴마다 오프라인 추정(늘 bytes4 = tokens(), §4 의 바닥을 재는 수)과, 이름 지은 토크나이저(rlo.tokenizers)의 수, 부른 쪽이
+    넘긴 공급자 사용량(rlo.usage)을 나란히. 합계도."""
+    from . import plugins
     usages = list(usages or [None] * len(texts))
     if len(usages) != len(texts):
         raise ValueError("usages: 턴마다 하나(없으면 None)")
+    tok = plugins.get("rlo.tokenizers", tokenizer) if tokenizer else None
     rows = []
     for k, (t, u) in enumerate(zip(texts, usages)):
-        rows.append({"turn": k, "bytes": len(t.encode("utf-8")), "estimate": tokens(t),
-                     "provider": usage_report(u, usage_format)})
+        row = {"turn": k, "bytes": len(t.encode("utf-8")), "estimate": tokens(t), "provider": usage_report(u, usage_format)}
+        if tok is not None:
+            row["tokenizer"] = {"name": tokenizer, "tokens": tok.count(t)}
+        rows.append(row)
     actual = [r["provider"]["prompt_tokens"] for r in rows if r["provider"] and r["provider"]["prompt_tokens"] is not None]
-    return {"turns": rows, "estimate": sum(r["estimate"] for r in rows),
-            "provider_prompt_tokens": sum(actual) if len(actual) == len(rows) and rows else None,
-            "usage_format": usage_format}
+    out = {"turns": rows, "estimate": sum(r["estimate"] for r in rows),
+           "provider_prompt_tokens": sum(actual) if len(actual) == len(rows) and rows else None,
+           "usage_format": usage_format}
+    if tok is not None:
+        out["tokenizer"] = {"name": tokenizer, "tokens": sum(r["tokenizer"]["tokens"] for r in rows)}
+    return out

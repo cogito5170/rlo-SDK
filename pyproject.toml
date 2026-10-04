@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlo-sdk"
-version = "0.10.0"
+version = "0.11.0"
 description = "rlo SDK -- 일곱 층(Telemetry · Sensor · DC · MS · action · guard · health)을 한 입구로 묶는다"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,3 +28,18 @@ packages = ["rlo", "rlo.suggest_model"]
 
 [tool.setuptools.package-data]
 rlo = ["data/*.json", "data/transcripts/*.jsonl", "data/transcripts/*.json"]
+
+# CMD-K18: 기본 제공 플러그인도 다른 플러그인과 같은 길(진입점)로 싣는다 -- rlo/plugins.py BUILTINS 와 같아야 한다
+[project.entry-points."rlo.transcripts"]
+claude_code = "rlo.readers:CLAUDE_CODE"
+codex_cli = "rlo.readers:CODEX_CLI"
+gemini_cli = "rlo.readers:GEMINI_CLI"
+
+[project.entry-points."rlo.usage"]
+anthropic = "rlo.usage_formats:ANTHROPIC"
+openai = "rlo.usage_formats:OPENAI"
+gemini = "rlo.usage_formats:GEMINI"
+otel = "rlo.usage_formats:OTEL"
+
+[project.entry-points."rlo.tokenizers"]
+bytes4 = "rlo.usage_formats:BYTES4"

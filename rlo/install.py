@@ -34,8 +34,12 @@ def is_ours(command: str) -> bool:
 
 
 def hook_command(*, model: str, mode: str = "shadow", grants=(), purpose: "str | None" = None,
-                 stall_threshold: "int | None" = None, record: "str | None" = None, python: "str | None" = None) -> str:
-    argv = [python or sys.executable, "-m", "rlo.hooks", "--model", str(Path(model).resolve()), "--mode", mode]
+                 stall_threshold: "int | None" = None, record: "str | None" = None, python: "str | None" = None,
+                 budget: "dict | None" = None, resolve: bool = True) -> str:
+    """budget: CMD-K17 컨텍스트 예산 {soft, hard, state_paths?, mode?, runtime?, usage_format?} -> --budget-* 플래그(K18 S5).
+    resolve=False 면 경로를 그대로 둔다(플러그인 꼴의 ${CLAUDE_PLUGIN_ROOT} 경로)."""
+    path = (lambda x: str(Path(x).resolve())) if resolve else str
+    argv = [python or sys.executable, "-m", "rlo.hooks", "--model", path(model), "--mode", mode]
     for g in grants:
         argv += ["--grant", g]
     if purpose:
@@ -43,8 +47,24 @@ def hook_command(*, model: str, mode: str = "shadow", grants=(), purpose: "str |
     if stall_threshold is not None:
         argv += ["--stall-threshold", str(stall_threshold)]
     if record:
-        argv += ["--record", str(Path(record).resolve())]
-    return " ".join(shlex.quote(x) for x in argv)
+        argv += ["--record", path(record)]
+    if budget:
+        from .ctxbudget import Budget
+        b = Budget.of(budget)                                 # 틀린 예산은 깔지 않는다
+        argv += ["--budget-soft", str(b.soft), "--budget-hard", str(b.hard), "--budget-mode", b.mode]
+        for sp in b.state_paths:
+            argv += ["--budget-state", sp]
+        if b.runtime:
+            argv += ["--budget-runtime", b.runtime]
+        if b.usage_format:
+            argv += ["--budget-usage-format", b.usage_format]
+    return " ".join(f'"{x}"' if not resolve and _plugin_path(x) else shlex.quote(x) for x in argv)
+
+
+def _plugin_path(x: str) -> bool:
+    """${CLAUDE_PLUGIN_ROOT}/... 는 큰따옴표로 감싼다 -- 셸이 변수를 펼치고, 펼친 경로에 빈칸이 있어도 한 낱말이다.
+    나머지 글자가 안전할 때만(따옴표 · $ · ` · \\ 없음)."""
+    return bool(re.fullmatch(r"\$\{CLAUDE_PLUGIN_ROOT\}[A-Za-z0-9_./-]*", x))
 
 
 def _load(p: Path) -> "tuple[str | None, dict]":
@@ -121,6 +141,7 @@ def main(cmd: str, argv) -> int:
         ap.add_argument("--stall-threshold", type=int, default=None)
         ap.add_argument("--record", default=None)
         ap.add_argument("--python", default=None, help="훅을 돌릴 python(기본: 지금 이 python)")
+        _budget_args(ap)
     a = ap.parse_args(argv)
     try:
         command = None
@@ -128,10 +149,82 @@ def main(cmd: str, argv) -> int:
             from .react import load_model
             load_model(a.model)                               # 틀린 모형은 깔지 않는다(substitutes 칸 포함, CMD-K11)
             command = hook_command(model=a.model, mode=a.mode, grants=a.grant, purpose=a.purpose,
-                                   stall_threshold=a.stall_threshold, record=a.record, python=a.python)
+                                   stall_threshold=a.stall_threshold, record=a.record, python=a.python,
+                                   budget=_budget_of(a))
         out = install(a.settings, command=command, remove=cmd == "uninstall-hook")
     except Exception as e:                                    # 실패하면 아무것도 쓰지 않았다
         print(f"rlo {cmd}: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    return 0
+
+
+def _budget_args(ap) -> None:
+    """컨텍스트 예산 플래그(CMD-K17 P2 · K18 S5). soft · hard 가 없으면 예산 없음 -- 기본 예산은 없다."""
+    ap.add_argument("--budget-soft", type=int, default=None)
+    ap.add_argument("--budget-hard", type=int, default=None)
+    ap.add_argument("--budget-state", action="append", default=[])
+    ap.add_argument("--budget-mode", default="shadow", choices=("shadow", "enforce"))
+    ap.add_argument("--runtime", default=None, help="transcript 읽개(rlo.transcripts) 이름 -> --budget-runtime")
+    ap.add_argument("--budget-usage-format", default=None)
+
+
+def _budget_of(a) -> "dict | None":
+    if a.budget_soft is None and a.budget_hard is None:
+        if a.budget_state or a.budget_mode != "shadow" or a.runtime or a.budget_usage_format:
+            raise ValueError("--budget-state / --budget-mode / --runtime need --budget-soft and --budget-hard")
+        return None
+    return {"soft": a.budget_soft, "hard": a.budget_hard, "state_paths": a.budget_state or ["STATE.md"],
+            "mode": a.budget_mode, "runtime": a.runtime, "usage_format": a.budget_usage_format}
+
+
+def claude_plugin(out_dir, *, model: str, name: str = "rlo-guard", mode: str = "shadow", grants=(),
+                  purpose: "str | None" = None, record: "str | None" = None, python: "str | None" = None,
+                  budget: "dict | None" = None) -> dict:
+    """Claude Code 플러그인 꼴을 out_dir 에 짓는다(K18 S5): .claude-plugin/plugin.json · hooks/hooks.json · rlo/model.json.
+    훅 명령은 ${CLAUDE_PLUGIN_ROOT}/rlo/model.json 을 읽는다. 짓기만 한다 -- 어느 세션에 까는지는 사용자가 정한다."""
+    import shutil
+    from . import __version__
+    from .react import load_model
+    load_model(model)                                         # 틀린 모형은 싣지 않는다
+    out = Path(out_dir)
+    if out.exists() and any(out.iterdir()):
+        raise SettingsError(f"{out}: 비어 있지 않다 -- 쓰지 않는다")
+    (out / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    (out / "hooks").mkdir(exist_ok=True)
+    (out / "rlo").mkdir(exist_ok=True)
+    shutil.copyfile(model, out / "rlo" / "model.json")
+    command = hook_command(model="${CLAUDE_PLUGIN_ROOT}/rlo/model.json", mode=mode, grants=grants, purpose=purpose,
+                           record=record, python=python, budget=budget, resolve=False)
+    manifest = {"name": name, "version": __version__,
+                "description": "rlo guard and context budget as Claude Code hooks (generated by rlo-sdk)",
+                "author": {"name": "rlo-sdk"}}
+    hooks = {"hooks": {ev: [{**({"matcher": m} if m else {}), "hooks": [{"type": "command", "command": command}]}]
+                       for ev, m in EVENTS}}
+    (out / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (out / "hooks" / "hooks.json").write_text(json.dumps(hooks, indent=2) + "\n", encoding="utf-8")
+    return {"plugin": str(out), "name": name, "command": command}
+
+
+def plugin_main(argv) -> int:
+    """python -m rlo.hooks claude-plugin --out DIR --model M [install-hook 과 같은 플래그]"""
+    import argparse
+    ap = argparse.ArgumentParser(prog="python -m rlo.hooks claude-plugin")
+    ap.add_argument("--out", required=True, help="지을 디렉터리(없거나 비어 있어야 한다)")
+    ap.add_argument("--name", default="rlo-guard")
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--mode", default="shadow", choices=("shadow", "enforce"))
+    ap.add_argument("--grant", action="append", default=[])
+    ap.add_argument("--purpose", default=None)
+    ap.add_argument("--record", default=None)
+    ap.add_argument("--python", default=None)
+    _budget_args(ap)
+    a = ap.parse_args(argv)
+    try:
+        out = claude_plugin(a.out, model=a.model, name=a.name, mode=a.mode, grants=a.grant, purpose=a.purpose,
+                            record=a.record, python=a.python, budget=_budget_of(a))
+    except Exception as e:
+        print(f"rlo claude-plugin: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 0

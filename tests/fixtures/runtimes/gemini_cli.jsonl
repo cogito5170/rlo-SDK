@@ -1,0 +1,8 @@
+{"sessionId": "s", "projectHash": "p", "startTime": "2026-10-04T12:00:00.000Z", "lastUpdated": "2026-10-04T12:00:00.000Z", "messages": []}
+{"id": "u1", "timestamp": "2026-10-04T12:00:01.000Z", "type": "user", "content": "go"}
+{"id": "g1", "timestamp": "2026-10-04T12:00:02.000Z", "type": "gemini", "content": "a", "model": "gemini-x"}
+{"id": "g1", "timestamp": "2026-10-04T12:00:02.000Z", "type": "gemini", "content": "a", "model": "gemini-x", "tokens": {"input": 181000, "output": 40, "cached": 120000, "thoughts": 3, "tool": 500, "total": 181040}}
+{"$set": {"lastUpdated": "2026-10-04T12:00:03.000Z"}}
+{"id": "u2", "timestamp": "2026-10-04T12:00:04.000Z", "type": "user", "content": "more"}
+{"id": "g2", "timestamp": "2026-10-04T12:00:05.000Z", "type": "gemini", "content": "b", "model": "gemini-x", "tokens": {"input": 999000, "output": 1, "cached": 0, "thoughts": 3, "tool": 0, "total": 999001}}
+{"$rewindTo": "u2"}

@@ -1,0 +1,1 @@
+{"sessionId": "s", "messages": [{"id": "u1", "type": "user", "content": "go"}, {"id": "g1", "type": "gemini", "content": "a", "tokens": {"input": 50000, "output": 10, "cached": 0, "thoughts": 3, "tool": 0, "total": 50010}}]}

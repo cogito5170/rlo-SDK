@@ -29,6 +29,7 @@ import sys
 NAME = "context-budget/1"
 MODES = ("shadow", "enforce")
 TAIL_BYTES = 256 * 1024                          # 처음 읽는 꼬리. 주 사슬 응답이 없으면 두 배씩 늘린다
+DEFAULT_RUNTIME = "claude_code"                  # 읽개 이름이 없을 때(K17 그대로)
 _PART_OK = re.compile(r"^(cd\s+\S+|git\s+(-C\s+\S+\s+)?(add|commit|push|status)\b.*)$")
 _SHELL = re.compile(r"`|\$\(|\$\{|\||>|<|(?<!&)&(?!&)")
 
@@ -39,6 +40,8 @@ class Budget:
     hard: int
     state_paths: tuple = ("STATE.md",)
     mode: str = "shadow"
+    runtime: "str | None" = None          # transcript 읽개(rlo.transcripts) 이름. None 이면 claude_code(K17 그대로)
+    usage_format: "str | None" = None     # usage 꼴(rlo.usage) 이름. None 이면 그 읽개의 꼴
 
     def __post_init__(self):
         for k in ("soft", "hard"):
@@ -53,59 +56,45 @@ class Budget:
         object.__setattr__(self, "state_paths", sp)
         if self.mode not in MODES:
             raise ValueError(f"context budget mode: one of {MODES}")
+        from . import plugins
+        reader = plugins.get("rlo.transcripts", self.runtime or DEFAULT_RUNTIME)      # 없는 이름은 설정 오류(KeyError)
+        plugins.get("rlo.usage", self.usage_format or reader.usage_format)
+
+    def context(self, transcript_path: str) -> "int | None":
+        """설정한 런타임의 transcript 에서 컨텍스트 토큰. 못 읽으면 None."""
+        return context_of(transcript_path, self.runtime, self.usage_format)
 
     @classmethod
     def of(cls, v) -> "Budget | None":
         """None · Budget · {soft, hard, state_paths?, mode?} -> Budget | None(꺼짐). 기본 예산은 없다."""
         if v is None or isinstance(v, Budget):
             return v
-        if not isinstance(v, dict) or set(v) - {"soft", "hard", "state_paths", "mode"} or not {"soft", "hard"} <= set(v):
-            raise ValueError("context budget: {soft, hard, state_paths?, mode?}")
-        return cls(v["soft"], v["hard"], tuple(v.get("state_paths", ("STATE.md",))), v.get("mode", "shadow"))
+        keys = {"soft", "hard", "state_paths", "mode", "runtime", "usage_format"}
+        if not isinstance(v, dict) or set(v) - keys or not {"soft", "hard"} <= set(v):
+            raise ValueError("context budget: {soft, hard, state_paths?, mode?, runtime?, usage_format?}")
+        return cls(v["soft"], v["hard"], tuple(v.get("state_paths", ("STATE.md",))), v.get("mode", "shadow"),
+                   v.get("runtime"), v.get("usage_format"))
 
 
-def _usage_of(line: str) -> "dict | None":
-    """그 줄이 주 사슬 assistant 응답이고 usage 가 있으면 usage. 아니면 None."""
-    try:
-        d = json.loads(line)
-    except ValueError:
+def context_of(transcript_path: str, runtime: "str | None" = None, usage_format: "str | None" = None) -> "int | None":
+    """런타임 읽개(rlo.transcripts)로 마지막 주 사슬 usage 를 읽고 usage 꼴(rlo.usage)로 맞춘 컨텍스트. 못 읽으면 None."""
+    from . import plugins
+    reader = plugins.get("rlo.transcripts", runtime or DEFAULT_RUNTIME)
+    raw = reader.last_usage(transcript_path)
+    if raw is None:
         return None
-    if not isinstance(d, dict) or d.get("type") != "assistant" or d.get("isSidechain"):
-        return None
-    m = d.get("message") or {}
-    if not isinstance(m, dict) or m.get("model") == "<synthetic>":
-        return None
-    u = m.get("usage")
-    return u if isinstance(u, dict) else None
+    norm = plugins.get("rlo.usage", usage_format or reader.usage_format).normalize(raw)
+    ctx = (norm or {}).get("context")
+    return ctx if isinstance(ctx, int) and not isinstance(ctx, bool) else None
 
 
 def context_tokens(transcript_path: str, tail_bytes: int = TAIL_BYTES) -> "int | None":
-    """transcript 꼬리에서 마지막 주 사슬 assistant usage -> 컨텍스트 토큰. 못 읽으면 None(0 으로 메우지 않는다)."""
-    try:
-        with open(transcript_path, "rb") as f:
-            size = f.seek(0, os.SEEK_END)
-            n = tail_bytes
-            while True:
-                start = max(0, size - n)
-                f.seek(start)
-                chunk = f.read(size - start)
-                lines = chunk.split(b"\n")
-                if start > 0:
-                    lines = lines[1:]                  # 꼬리의 첫 줄은 잘렸을 수 있다
-                for raw in reversed(lines):
-                    if not raw.strip():
-                        continue
-                    u = _usage_of(raw.decode("utf-8", "replace"))
-                    if u is not None:
-                        parts = [u.get(k) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")]
-                        if any(not isinstance(p, int) or isinstance(p, bool) for p in parts):
-                            return None
-                        return sum(parts)
-                if start == 0:
-                    return None
-                n *= 2
-    except OSError:
-        return None
+    """Claude Code transcript 꼬리에서 마지막 주 사슬 assistant usage -> 컨텍스트 토큰(K17 의 입구 그대로). 못 읽으면 None."""
+    from .readers import CLAUDE_CODE
+    from .usage_formats import ANTHROPIC
+    raw = CLAUDE_CODE.last_usage(transcript_path, tail_bytes)
+    ctx = (ANTHROPIC.normalize(raw) or {}).get("context") if raw is not None else None
+    return ctx if isinstance(ctx, int) and not isinstance(ctx, bool) else None
 
 
 def is_checkpoint(tool_name: str, tool_input, state_paths: tuple) -> bool:

@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.10.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.11.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -285,6 +285,36 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)
   창이 열릴 때까지 한 번 잔다(`governor_sleep`, 90 초 넘는 대기 · 429 세 번 넘으면 미룸).
+
+## 어느 모형 · 런타임에나 — 플러그인 (CMD-K18, BD-300)
+
+rlo 의 속은 공급자 SDK 를 들이지 않는다(네트워크 · 키 · 내장 할당 없음, BD-289). 런타임 · usage 꼴 · 토크나이저는 **설치한
+패키지가 진입점으로 꽂는다** — rlo 를 고치지 않는다. `python -m rlo.plugins list` 가 실린 것과 실리지 못한 것을 보인다.
+
+```toml
+[project.entry-points."rlo.transcripts"]   # 런타임 transcript 읽개
+my_runtime = "my_pkg.reader:READER"        # name · version · api=1 · usage_format · last_usage(path) -> dict | None
+[project.entry-points."rlo.usage"]         # usage 꼴
+my_format = "my_pkg.usage:FORMAT"          # normalize(raw) -> {input, cache_read, cache_creation, output, context} | None
+[project.entry-points."rlo.tokenizers"]    # 토크나이저
+my_tok = "my_pkg.tok:TOKENIZER"            # count(text) -> int
+```
+
+- **플러그인 API 판 1**: 객체(클래스면 인자 없이 만든다)는 `name`(진입점 이름과 같다) · `version` · `api`(1)와 무리의 메서드를
+  갖는다. 판이 다르거나 · 이름이 겹치거나 · 들이다 실패하면 그것만 `plugins.load_errors()` 에 적고 나머지는 싣는다. 기본 제공이
+  먼저 실리므로 같은 이름의 바깥 플러그인은 겹침으로 기록된다.
+- **기본 제공**(같은 진입점 길): 읽개 `claude_code`(K17 그대로) · `codex_cli` · `gemini_cli`(둘은 `experimental` — 꼴은 openai/codex
+  `afb436d` 와 @google/gemini-cli-core 0.62.0 의 소스로 확인했고 fixture 는 그 꼴, 실제 세션 기록으로는 재지 않았다), usage 꼴
+  `anthropic` · `openai` · `gemini` · `otel`(Telemetry `l0_usage` 를 감싼다; OpenAI · Gemini 에는 캐시 쓰기 갈래가 없어 0, Gemini 가
+  빼고 보낸 cached 는 0, 그 밖에 모르는 것은 None), 토크나이저 `bytes4`(= `pspec.tokens`, §4 의 바닥을 재는 수 — 바뀌지 않는다).
+- **컨텍스트 예산**: `context_budget={..., "runtime": "codex_cli", "usage_format": None}` · 명령 훅 `--budget-runtime` ·
+  `--budget-usage-format`. 이름이 없으면 `claude_code`(K17 그대로), 없는 이름은 설정 오류. 기록 줄에 `runtime`.
+- **토큰 보고**: `pspec.token_report(texts, usages, usage_format, tokenizer=None)` — 추정은 늘 bytes4, 토크나이저를 이름 지으면
+  그 수를 옆에(`tokenizer`), 공급자 사용량은 usage 꼴로 맞춘 칸(`provider.context` 등, 앞 판의 이름도 그대로).
+- **꾸러미**: `install-hook` 이 `--budget-soft/--budget-hard/--budget-state/--budget-mode/--runtime/--budget-usage-format` 을 받는다.
+  `python -m rlo.hooks claude-plugin --out DIR --model M [같은 플래그]` 가 Claude Code 플러그인 꼴(`.claude-plugin/plugin.json` ·
+  `hooks/hooks.json` · `rlo/model.json`, 명령은 `"${CLAUDE_PLUGIN_ROOT}/rlo/model.json"` 을 읽는다)을 짓는다 —
+  `claude plugin validate --strict` 를 지난다. 짓기만 한다: 어느 세션에 까는지는 사용자가 정한다.
 
 ## 컨텍스트 예산 — context-budget/1 (CMD-K17, BD-296)
 

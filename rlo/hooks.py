@@ -361,7 +361,7 @@ class HookAdapter:
         from . import ctxbudget as CB
         b = self.budget
         try:
-            ctx = CB.context_tokens(input_data["transcript_path"])
+            ctx = b.context(input_data["transcript_path"])
             stage, out = CB.decide(ctx, input_data.get("tool_name"), input_data.get("tool_input"), b)
         except Exception as e:                     # 예산이 고장 나도 가드는 돈다(모름처럼)
             ctx, stage, out = None, "unknown", {}
@@ -369,6 +369,7 @@ class HookAdapter:
         denies = out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         self.record("context_budget", {"tool_use_id": input_data.get("tool_use_id"), "tool_name": input_data.get("tool_name"),
                                        "stage": stage, "ctx": ctx, "soft": b.soft, "hard": b.hard, "mode": b.mode,
+                                       "runtime": b.runtime or CB.DEFAULT_RUNTIME,
                                        "enforced": b.mode == "enforce" and bool(out), "denied": b.mode == "enforce" and denies})
         if b.mode == "enforce" and denies:
             return out                             # hard 를 넘었고 checkpoint 도구가 아니다 -- 가드를 물을 것도 없다
@@ -507,6 +508,9 @@ def _parser():
     ap.add_argument("--budget-soft", type=int, default=None, help="컨텍스트 예산 soft(토큰, CMD-K17). soft · hard 가 없으면 꺼짐")
     ap.add_argument("--budget-hard", type=int, default=None, help="컨텍스트 예산 hard(토큰)")
     ap.add_argument("--budget-state", action="append", default=[], help="checkpoint 로 쓸 상태 파일(되풀이, 기본 STATE.md)")
+    ap.add_argument("--budget-runtime", default=None,
+                    help="transcript 읽개(rlo.transcripts) 이름(기본 claude_code). python -m rlo.plugins list 로 본다")
+    ap.add_argument("--budget-usage-format", default=None, help="usage 꼴(rlo.usage) 이름(기본: 그 읽개의 꼴)")
     ap.add_argument("--budget-mode", default="shadow", choices=("shadow", "enforce"),
                     help="예산 모드(기본 shadow -- 기록만). 가드 모드(--mode)와 따로다")
     ap.add_argument("--no-incremental", action="store_true",
@@ -539,13 +543,13 @@ def _adapter_from_args(a, record=None) -> HookAdapter:
 
 def _budget_from_args(a):
     if a.budget_soft is None and a.budget_hard is None:
-        if a.budget_state or a.budget_mode != "shadow":
+        if a.budget_state or a.budget_mode != "shadow" or a.budget_runtime or a.budget_usage_format:
             raise ValueError("--budget-state / --budget-mode need --budget-soft and --budget-hard")
         return None                                # 기본 예산은 없다(BD-289)
     if a.budget_soft is None or a.budget_hard is None:
         raise ValueError("context budget needs both --budget-soft and --budget-hard")
     return {"soft": a.budget_soft, "hard": a.budget_hard, "state_paths": a.budget_state or ["STATE.md"],
-            "mode": a.budget_mode}
+            "mode": a.budget_mode, "runtime": a.budget_runtime, "usage_format": a.budget_usage_format}
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:
@@ -553,6 +557,9 @@ def main(argv=None, stdin=None, stdout=None) -> int:
     if argv and argv[0] in ("install-hook", "uninstall-hook"):      # 깔기 · 떼기(CMD-K6) -- rlo/install.py
         from .install import main as install_main
         return install_main(argv[0], argv[1:])
+    if argv and argv[0] == "claude-plugin":                      # Claude Code 플러그인 꼴 짓기(CMD-K18 S5)
+        from .install import plugin_main
+        return plugin_main(argv[1:])
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     a = _parser().parse_args(argv)
     data, problem = read_input(stdin)
