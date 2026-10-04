@@ -55,7 +55,7 @@ a.close_windows()                                                      # 창이 
 ```python
 import rlo
 rlo.versions()
-# {"sdk": "rlo-sdk/0.9.0", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
+# {"sdk": "rlo-sdk/0.8.2", "pins": {저장소: sha}, "extras": {"sensor": {...}}, "installed": {저장소: pip 가 받은 sha},
 #  "contracts": {"action-contract": "action-contract/1", "action-spec": "action-spec/1", "action-model": "action-model/1",
 #                "guard-result": "guard-result/1", "validation-result": "validation-result/1",
 #                "verification-record": "verification-record/1", "state-export": "llmsensor.state-export/2",
@@ -285,52 +285,6 @@ report = Scheduler(steps, gov, call_gemini, kinds=kinds, ledger="ledger.jsonl").
   **미룬 결과**(`outcome == "deferred"`, `wait_s` · `step_id`)를 낸다. `tick()` 또는 `close_windows()` 가 창이 열리면 차례대로
   다시 보낸다. 새 요청은 세운 걸음 뒤에 선다. 한 실행 안의 둘째 부름부터는 걸음을 다시 보내지 않고(앞 판을 되풀이하게 된다)
   창이 열릴 때까지 한 번 잔다(`governor_sleep`, 90 초 넘는 대기 · 429 세 번 넘으면 미룸).
-
-## 프롬프트 — 의미 서명에서 짓고, 결정론 지표로 고른다 (CMD-K15, BD-288)
-
-프롬프트를 손글(`str.format`)이 아니라 **의미 서명**(`prompt-spec/1`, 데이터)에서 컴파일한다. 같은 명세가 답 검사기도 짓는다 —
-프롬프트와 파서가 어긋나지 않는다. LLM 의 답은 **Opinion**(SEMANTIC_MODEL §2.18)이다. 권위가 없고 State 가 아니다.
-
-```python
-from rlo import Governor, Metric, PromptSpec, optimize
-
-spec = PromptSpec.load({
-    "schema": "prompt-spec/1", "id": "demo.classify", "version": "1", "goal": "Classify the report as ok or broken.",
-    "inputs": [{"name": "report", "term": "Observation", "basis": "OBSERVED"},          # SEMANTIC_MODEL 낱말 + basis
-               {"name": "health", "term": "State", "basis": "DEFINITIONAL"}],
-    "output": {"term": "Opinion", "format": "json",
-               "fields": [{"name": "label", "type": "enum", "values": ["ok", "broken"]}, {"name": "why", "type": "string"}]},
-    "rules": ["answer in English"], "examples": [...]})
-c = spec.compile({"id": "base"}, {"report": text, "health": state})    # 같은 입력 -> 같은 바이트(OS · 해시 씨앗 · 로캘 무관)
-r = c.check(answer)                                                    # r.ok · r.opinion(Opinion) · r.problems(칸 이름만)
-
-result = optimize(spec, [variant_a, variant_b], cases, model=call_model, metrics=[Metric("exact", exact)],
-                  split={"train": [...], "held_out": [...]}, governor=Governor({"m": {"rpm": 5, "calls": 10}}),
-                  run_dir="runs/classify-1", margin=0.1)
-# result.adopted · result.chosen · result.train · result.held_out · result.status(done | capped | paused)
-```
-
-- **명세(`prompt-spec/1`)**: `goal` · `inputs`(이름 · `term` ∈ SEMANTIC_MODEL §1 · §2.17 낱말 · `basis` ∈ §2.3 어휘 · `about`) ·
-  `output`(`term` 은 `Opinion` 만, `format` json, `fields`: string · integer · number · boolean · array · object · const · enum,
-  `required` · `nullable` · `shape`(꼴 줄에 보일 글)) · `rules` · `examples`(검사기를 지나야 한다) · 기본 `wording` · `input_labels`.
-  모르는 낱말 · basis 없음 · 모르는 칸은 `SpecError`. 명세 지문 `spec.ref` = `id@version#sha256 앞 12 자`.
-- **변형**: `{id, wording, input_labels, field_order, shots}` 만 — 지시 글 칸(닫힌 목록 `SLOTS`) · 입력 이름표 · 출력 칸 차례
-  (순열) · 예시 번호. goal · inputs · output · rules 를 바꾸려 하면 `VariantError`.
-- **컴파일**: 차례는 명세 목록에서만 온다(넘겨받은 dict · set 의 차례, 시각, 로캘, 난수 없음). 글이 아닌 입력 값은 키 정렬 JSON.
-  기본 변형으로 지금 손글을 바이트 그대로 지을 수 있다(`tests/test_prompt_spec.py` 가 ga 의 계획 프롬프트로 보인다).
-- **`optimize`**: 모든 변형(base 먼저)을 train 에서 재고, train 이 base 보다 높은 가장 좋은 하나만 held-out 에서 base 와 함께 잰다.
-  held-out 이득이 `margin` 이상일 때만 채택, 아니면 base. **모형은 넣어 받는 함수**(`model(text) -> str | {text, usage}`) —
-  rlo 는 공급자 SDK 를 들이지 않고 키를 읽지 않는다. 지표는 `Metric(name, fn, kind)`, `fn(check, case) -> [0, 1]`;
-  `kind="llm_judge"` 만 있으면 받지 않는다. **상한**은 지킴이 예산의 `calls`(부름 총수, 저장 · 되살림)로 지킨다 — 상한 없는
-  지킴이는 받지 않고, 상한에서 `capped` 로 멈춘다. 분당 창 대기는 자고, `max_wait_s` 보다 길면 `paused`.
-- **캐시 · 이어 하기**: 열쇠 = sha256(프롬프트 글 + NUL + 사례 id). 답은 받자마자 `run_dir/cache.jsonl` 에 적는다(fsync).
-  `run_dir/run.json`(설정 지문 · 지킴이 상태 · 결과)이 있으면 이어 간다 — 죽은 뒤 다시 돌아도 같은 결과, 되풀이 부름 없음.
-  설정(명세 · 변형 · 사례 · 나눔 · 여유폭 · 지표 · 모형 이름)이 다르면 `RunMismatch`. 상한은 다음 날 올려 이어 갈 수 있다.
-- **기록**: 부름마다 L0 `llm.request`(`prompt_chars`) · `llm.response`(`output_text_chars`, `usage_format` 을 주면 usage) 또는
-  `llm.error`, 토막마다 `run.start` · `run.end`(`run_dir/l0.jsonl`, run_id `optimize:<spec id>:<토막>`). 원장
-  `run_dir/ledger.jsonl` 은 사례 평가마다(변형 · 사례 · 나눔 · 캐시 · 문제 · 점수) · 토막마다 한 줄 — 프롬프트 · 답 글은 없다.
-- **쓰지 않는다**: `optimize` 는 결과를 돌려줄 뿐 프롬프트 파일을 쓰거나 내보내지 않는다(run_dir 밖에 아무것도 쓰지 않는다).
-  바뀐 프롬프트는 코드 diff 와 baseline 판정으로만 제품에 간다.
 
 ## 기록을 읽는 도구 둘
 

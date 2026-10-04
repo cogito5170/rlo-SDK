@@ -11,8 +11,6 @@
   `errors.translate` 로 읽는다. 없으면 할당 힌트(`QuotaFailure.violations[].quotaId` 의 PerMinute / PerDay): 분이면 창 하나(60 초),
   날이면 오늘은 더 부르지 않는다(무한 대기 -- 기다려도 풀리지 않는 것을 바쁘게 되풀이하지 않는다). 그것도 없으면 창 하나.
 - 공급자를 가리지 않는다: 예외의 `status`(MS ProviderError) · `body` · `headers` 를 읽는다. Gemini 의 429 꼴을 안다.
-- 부름 상한(CMD-K15): 예산의 `calls` 는 이 지킴이가 그 모형에 허락하는 부름의 **총수**다(창이 아니다). 다 쓰면 wait_s 가
-  무한이고 try_acquire 는 ok 가 아니다. 쓴 수는 to_dict · load 로 저장 · 다시 읽힌다(여러 날 이어 하는 실행의 상한).
 """
 from __future__ import annotations
 
@@ -29,19 +27,18 @@ EPS = 1e-6                            # 창 끝 비교의 부동소수 여유 --
 class Budget:
     rpm: "int | None" = None          # 분당 요청 수. None 이면 세지 않는다
     tpm: "int | None" = None          # 분당 토큰 수(입력 + 출력). None 이면 세지 않는다
-    calls: "int | None" = None        # 부름 총수 상한(CMD-K15). None 이면 세지 않는다
 
     @classmethod
     def of(cls, v) -> "Budget":
         if isinstance(v, Budget):
             return v
-        if not isinstance(v, dict) or set(v) - {"rpm", "tpm", "calls"}:
-            raise ValueError(f"예산은 {{rpm, tpm, calls}} 이어야 한다 ({v!r})")
-        for k in ("rpm", "tpm", "calls"):
+        if not isinstance(v, dict) or set(v) - {"rpm", "tpm"}:
+            raise ValueError(f"예산은 {{rpm, tpm}} 이어야 한다 ({v!r})")
+        for k in ("rpm", "tpm"):
             x = v.get(k)
             if x is not None and (not isinstance(x, int) or isinstance(x, bool) or x <= 0):
                 raise ValueError(f"예산 {k}: 0 보다 큰 정수 또는 None ({x!r})")
-        return cls(v.get("rpm"), v.get("tpm"), v.get("calls"))
+        return cls(v.get("rpm"), v.get("tpm"))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,7 +80,6 @@ class Governor:
         self.default_model = default_model or next(iter(self.budgets))
         self._calls = {m: collections.deque() for m in self.budgets}     # [시각, 토큰, ticket]
         self._blocked_until = {m: 0.0 for m in self.budgets}
-        self._used = {m: 0 for m in self.budgets}                         # 부른 총수(calls 상한)
         self._tickets = 0
 
     def _model(self, model):
@@ -105,8 +101,6 @@ class Governor:
         b, q = self.budgets[m], self._calls[m]
         wait = max(0.0, self._blocked_until[m] - now)
         wait = 0.0 if wait <= EPS else wait
-        if b.calls is not None and self._used[m] + calls > b.calls:
-            return math.inf                                 # 총수를 다 썼다 -- 기다려도 늘지 않는다
         if b.rpm is not None and len(q) + calls > b.rpm:
             k = len(q) + calls - b.rpm                     # 창에서 빠져야 할 요청 수
             wait = max(wait, q[k - 1][0] + WINDOW_S - now) if k <= len(q) else math.inf
@@ -133,14 +127,7 @@ class Governor:
             return Grant(False, w)
         self._tickets += 1
         self._calls[m].append([self.clock(), max(0, int(est_tokens or 0)), self._tickets])
-        self._used[m] += 1
         return Grant(True, 0.0, self._tickets)
-
-    def remaining_calls(self, model: "str | None" = None) -> float:
-        """calls 상한까지 남은 부름 수(상한이 없으면 무한)."""
-        m = self._model(model)
-        c = self.budgets[m].calls
-        return math.inf if c is None else max(0, c - self._used[m])
 
     def observe(self, ticket: "int | None", usage, model: "str | None" = None) -> None:
         """부른 뒤 실제 사용량으로 추정을 바꾼다. 사용량을 모르면 추정을 둔다."""
@@ -155,14 +142,13 @@ class Governor:
     # ── 저장 · 다시 읽기(CMD-K12 S6) -- 창은 절대 시각(시계의 단위)으로 남는다. 무한 대기는 "inf" ──
     def to_dict(self) -> dict:
         return {"windows": {m: [[t, tok] for t, tok, _ in q] for m, q in self._calls.items()},
-                "blocked_until": {m: ("inf" if math.isinf(b) else b) for m, b in self._blocked_until.items()},
-                "used": dict(self._used)}
+                "blocked_until": {m: ("inf" if math.isinf(b) else b) for m, b in self._blocked_until.items()}}
 
     def load(self, d: dict) -> None:
         """to_dict 의 꼴을 다시 싣는다. 예산 밖 모형은 받지 않는다(설정이 바뀌었으면 알린다)."""
-        if not isinstance(d, dict) or not {"windows", "blocked_until"} <= set(d) <= {"windows", "blocked_until", "used"}:
-            raise ValueError("지킴이 상태: {windows, blocked_until[, used]} 이어야 한다")
-        unknown = (set(d["windows"]) | set(d["blocked_until"]) | set(d.get("used", {}))) - set(self.budgets)
+        if not isinstance(d, dict) or set(d) != {"windows", "blocked_until"}:
+            raise ValueError("지킴이 상태: {windows, blocked_until} 이어야 한다")
+        unknown = (set(d["windows"]) | set(d["blocked_until"])) - set(self.budgets)
         if unknown:
             raise ValueError(f"지킴이 상태에 예산 밖 모형 {sorted(unknown)}")
         for m, rows in d["windows"].items():
@@ -172,10 +158,6 @@ class Governor:
                 self._calls[m].append([float(t), int(tok), self._tickets])
         for m, b in d["blocked_until"].items():
             self._blocked_until[m] = math.inf if b == "inf" else float(b)
-        for m, n in d.get("used", {}).items():
-            if not isinstance(n, int) or isinstance(n, bool) or n < 0:
-                raise ValueError(f"지킴이 상태 used[{m}]: 0 이상의 정수 ({n!r})")
-            self._used[m] = n
 
     @staticmethod
     def rate_limit_parts(exc) -> "tuple[int | None, dict | None, dict | None]":
