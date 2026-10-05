@@ -16,8 +16,8 @@ dependencies = [
     "dc @ git+https://github.com/cogito5170/DC@7e0ac1494192e49ab03c687c79f7156cb38abcec",
     "ms @ git+https://github.com/cogito5170/MS@1f1018e0348428c9b83af4f6679659f0057e3f4b",
     "action-contract @ git+https://github.com/cogito5170/action@9d6729fc6809d68d2b5d55b4ad2fd37e5281d998",
-    "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",
-    "health @ git+https://github.com/cogito5170/health@afcff3960694f58978afec2cdde62cac9e27830f",
+    "guard @ git+https://github.com/cogito5170/guard@3f7b2352c9c9eb198c4020ea5cdd125af135425f",
+    "health @ git+https://github.com/cogito5170/health@798e7ad21d73d7ec21beb04cde1fdd7a73b9d742",
 ]
 
 [project.optional-dependencies]

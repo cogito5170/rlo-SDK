@@ -15,16 +15,16 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEL = "f6c7ae26d336965d3558092517e97d37d222c4ea"
 ACT, ACT_HEAD = "9d6729fc6809d68d2b5d55b4ad2fd37e5281d998", "2f4791e5c33df6cf19d41f139d95d74e4b86b42e"
-GUARD_REQ = '    "guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c",\n'
-GUARD_PIN = '    "guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c"),\n'
+GUARD_REQ = '    "guard @ git+https://github.com/cogito5170/guard@3f7b2352c9c9eb198c4020ea5cdd125af135425f",\n'
+GUARD_PIN = '    "guard": ("guard", _GH + "guard", "3f7b2352c9c9eb198c4020ea5cdd125af135425f"),\n'
 
 # (이름, [(파일, 옛 글, 새 글), ...])
 MUTANTS = [
     # guard 를 선택으로
     ("pyproject: guard 를 extras 로", [("pyproject.toml", GUARD_REQ, ""),
-                                      ("pyproject.toml", 'sensor = [', 'guard = ["guard @ git+https://github.com/cogito5170/guard@be871b9d89fe77badeef901caaa75edc1848f13c"]\nsensor = [')]),
+                                      ("pyproject.toml", 'sensor = [', 'guard = ["guard @ git+https://github.com/cogito5170/guard@3f7b2352c9c9eb198c4020ea5cdd125af135425f"]\nsensor = [')]),
     ("_pins: guard 를 extras 로", [("rlo/_pins.py", GUARD_PIN, ""),
-                                  ("rlo/_pins.py", 'EXTRAS = {\n', 'EXTRAS = {\n    "guard": {"guard": ("guard", _GH + "guard", "be871b9d89fe77badeef901caaa75edc1848f13c")},\n')]),
+                                  ("rlo/_pins.py", 'EXTRAS = {\n', 'EXTRAS = {\n    "guard": {"guard": ("guard", _GH + "guard", "3f7b2352c9c9eb198c4020ea5cdd125af135425f")},\n')]),
     ("autonomy: guard · 실행기 · VERIFY 없이도 선다", [("rlo/autonomy.py", "        if missing:\n", "        if False:\n")]),
     # snapshot 길을 냄
     ("autonomy: DC 길을 꽂지 않음(snapshot 길)", [("rlo/autonomy.py", "        self.runtime.state_reader = MSStateReader(builder, purpose)\n", "")]),

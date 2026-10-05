@@ -76,8 +76,8 @@ MS 의 sha 없는 `ms[sensor]` extras 는 `rlo-sdk[sensor]` 와 함께 깔면 �
 | DC | `dc` | `7e0ac14` | 필수 (D18 목적 `agent_tool_call`) |
 | MS | `ms` | `1f1018e` | 필수 (M26 `risky=` · M27 sha 없는 `ms[sensor]` 를 뺐다) |
 | action | `action-contract` | `9d6729f` | 필수. stage-3 머리 `2f4791e` 와 패키지 코드가 같다. MS · guard · health 가 `9d6729f` 로 고정해 같은 sha 를 쓴다(다르면 pip 가 설치하지 못한다) |
-| guard | `guard` | `be871b9` | 필수 |
-| health | `health` | `afcff39` | 필수 |
+| guard | `guard` | `3f7b235` | 필수 |
+| health | `health` | `798e7ad` | 필수 |
 | Sensor | `llmsensor` | `ff17bdd` | `[sensor]`. SEN1 · SEN2 — 이어 받기(`RunState.extend`) · `evaluate="once"`, Telemetry 고정은 `f6c7ae2`(0.2.1) |
 
 ## 시험
